@@ -1,0 +1,19 @@
+--- a/net/netfilter/nf_conntrack_standalone.c
++++ b/net/netfilter/nf_conntrack_standalone.c
+@@ -1158,6 +1158,7 @@
+ 	table[NF_SYSCTL_CT_CHECKSUM].data = &net->ct.sysctl_checksum;
+ 	table[NF_SYSCTL_CT_LOG_INVALID].data = &net->ct.sysctl_log_invalid;
+ 	table[NF_SYSCTL_CT_ACCT].data = &net->ct.sysctl_acct;
++	table[NF_SYSCTL_CT_QOS].data = &net->ct.sysctl_qos;
+ #ifdef CONFIG_NF_CONNTRACK_EVENTS
+ 	table[NF_SYSCTL_CT_EVENTS].data = &net->ct.sysctl_events;
+ #endif
+@@ -1183,6 +1184,8 @@
+ 		table[NF_SYSCTL_CT_MAX].mode = 0444;
+ 		table[NF_SYSCTL_CT_EXPECT_MAX].mode = 0444;
+ 		table[NF_SYSCTL_CT_BUCKETS].mode = 0444;
++		/* This vendor TCP switch is global, just like the table size. */
++		table[NF_SYSCTL_CT_PROTO_TCP_NO_WINDOW_CHECK].mode = 0444;
+ 	}
+ 
+ 	cnet->sysctl_header = register_net_sysctl_sz(net, "net/netfilter",

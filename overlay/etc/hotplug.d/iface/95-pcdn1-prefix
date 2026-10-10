@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$INTERFACE:$ACTION" in
+    2_1v6:ifup|2_1v6:ifupdate|2_1v6:ifdown)
+        /usr/libexec/pcdn1-config.py --event >/tmp/pcdn1-prefix-event.json 2>/tmp/pcdn1-prefix-error.log
+        ;;
+esac

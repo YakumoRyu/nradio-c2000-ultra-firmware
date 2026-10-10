@@ -1,0 +1,32 @@
+#!/bin/sh
+# Only generic defaults and maintenance jobs; personal values are never embedded.
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = NRadio-C2000MAX-Ultra ] || exit 0
+set_missing() {
+    uci -q get "$1" >/dev/null && return 0
+    uci set "$1=$2"
+}
+set_missing system.@system[0].zram_size_mb 1024
+set_missing system.@system[0].zram_comp_algo zstd
+set_missing system.@system[0].zram_comp_level 6
+set_missing system.@system[0].zram_priority 100
+uci commit system
+
+# QModem owns the cellular DHCP interface. Do not create two competing clients.
+if [ "$(uci -q get network.wan.device)" = eth2 ] &&
+   [ -z "$(uci -q get network.2_1)" ]; then
+    uci set network.wan.proto=none
+    uci set network.wan.auto=0
+    uci set network.wan6.auto=0
+    uci commit network
+fi
+
+mkdir -p /etc/crontabs
+umask 077
+cron=/etc/crontabs/root
+for helper in miniupnpd-ipv6-ready pcdn-ipv6-access; do
+    job="* * * * * /usr/libexec/$helper >/dev/null 2>&1 #ultra-$helper"
+    grep -Fq "/usr/libexec/$helper" "$cron" 2>/dev/null || printf '\n%s\n' "$job" >> "$cron"
+done
+# Generate WEB endpoint addresses from the current LAN, including fresh installs.
+[ ! -x /usr/bin/gen_webui_config.sh ] || /usr/bin/gen_webui_config.sh
+exit 0

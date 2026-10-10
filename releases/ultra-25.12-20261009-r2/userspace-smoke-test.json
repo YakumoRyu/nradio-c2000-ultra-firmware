@@ -1,0 +1,84 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "python_dependencies",
+      "passed": true
+    },
+    {
+      "name": "ucode",
+      "passed": true
+    },
+    {
+      "name": "docker",
+      "passed": true
+    },
+    {
+      "name": "dockerd",
+      "passed": true
+    },
+    {
+      "name": "cloudflared",
+      "passed": true
+    },
+    {
+      "name": "mihomo",
+      "passed": true
+    },
+    {
+      "name": "opkg",
+      "passed": true
+    },
+    {
+      "name": "tar",
+      "passed": true
+    },
+    {
+      "name": "AT-daemon-dependencies",
+      "passed": true
+    },
+    {
+      "name": "QModem-SMS-dependencies",
+      "passed": true
+    },
+    {
+      "name": "syntax:etc/init.d/qmodem_network",
+      "passed": true
+    },
+    {
+      "name": "syntax:etc/init.d/codex-docker",
+      "passed": true
+    },
+    {
+      "name": "syntax:etc/init.d/wifi_e2p",
+      "passed": true
+    },
+    {
+      "name": "syntax:etc/uci-defaults/99-ultra-solidified",
+      "passed": true
+    },
+    {
+      "name": "syntax:usr/sbin/ultra-package-feeds",
+      "passed": true
+    },
+    {
+      "name": "syntax:lib/upgrade/emmc.sh",
+      "passed": true
+    },
+    {
+      "name": "syntax:lib/upgrade/platform.sh",
+      "passed": true
+    },
+    {
+      "name": "WebUI-version",
+      "passed": true
+    }
+  ],
+  "does_not_verify": [
+    "real kernel boot",
+    "5G registration",
+    "Wi-Fi association",
+    "hardware forwarding",
+    "real factory reset"
+  ]
+}

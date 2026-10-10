@@ -1,0 +1,233 @@
+#!/usr/bin/python3
+"""Bounded Mieru recovery after the eth2 WAN changes; never redials the modem."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+STATE = Path('/tmp/openclash-wan-recover.json')
+EVENT = Path('/tmp/openclash-wan-event')
+SETTLE, WINDOW, INTERVAL, COOLDOWN = 60, 900, 55, 1800
+MAIN_GROUP = '\U0001f680 节点选择'
+GAME_GROUP = '\U0001f3ae 海外游戏'
+
+
+def command(args, timeout=5):
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=True).stdout.strip()
+
+
+def selected_leaf(proxies, name):
+    seen = set()
+    while name not in seen and name in proxies:
+        seen.add(name)
+        item = proxies[name]
+        if not item.get('now'):
+            return name, item.get('type')
+        name = item['now']
+    return None, None
+
+
+class Runtime:
+    def __init__(self):
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.credentials = None
+
+    def api(self, path, method='GET'):
+        if self.credentials is None:
+            port = int(command(['uci', '-q', 'get', 'openclash.config.cn_port']))
+            secret = command(['uci', '-q', 'get', 'openclash.config.dashboard_password'])
+            self.credentials = (port, secret)
+        port, secret = self.credentials
+        req = urllib.request.Request('http://127.0.0.1:%d%s' % (port, path),
+                                     headers={'Authorization': 'Bearer ' + secret}, method=method)
+        with self.opener.open(req, timeout=7) as response:
+            data = response.read(2 * 1024 * 1024)
+            return json.loads(data) if data else {}
+
+    def snapshot(self):
+        interfaces = json.loads(command(['ubus', 'call', 'network.interface', 'dump']))['interface']
+        wan = []
+        ready = False
+        for item in interfaces:
+            if item.get('device') != 'eth2' and item.get('l3_device') != 'eth2':
+                continue
+            addresses = sorted(x['address'] for kind in ('ipv4-address', 'ipv6-address', 'ipv6-prefix') for x in item.get(kind, []))
+            routes = sorted(x.get('nexthop', '') for x in item.get('route', []) if x.get('mask') == 0)
+            up = bool(item.get('up'))
+            ready |= bool(up and addresses and routes)
+            wan.append({'interface': item['interface'], 'up': up, 'addresses': addresses, 'gateways': routes})
+        try:
+            event = EVENT.read_text().strip()
+        except FileNotFoundError:
+            event = ''
+        try:
+            enabled = command(['uci', '-q', 'get', 'openclash.config.enable']) == '1'
+            pids = command(['pidof', 'clash_meta']).split()
+            core = pids[0] if len(pids) == 1 else None
+        except subprocess.CalledProcessError:
+            enabled, core = False, None
+        return {'wan': sorted(wan, key=lambda x: x['interface']), 'event': event, 'ready': ready, 'enabled': enabled, 'core': core}
+
+    def direct(self):
+        results = []
+        for url in ('https://www.baidu.com/', 'https://www.qq.com/'):
+            try:
+                result = command(['curl', '--noproxy', '*', '-4', '--interface', 'eth2', '-sS',
+                                  '--connect-timeout', '3', '--max-time', '5', '-o', '/dev/null',
+                                  '-w', '%{http_code}', url], timeout=6)
+                ok = result in ('200', '204')
+                results.append({'host': urllib.parse.urlsplit(url).hostname, 'status': result, 'ok': ok})
+                if ok:
+                    return True, results
+            except (subprocess.SubprocessError, OSError) as exc:
+                results.append({'host': urllib.parse.urlsplit(url).hostname, 'error': type(exc).__name__})
+        return False, results
+
+    def proxy(self):
+        proxies = self.api('/proxies')['proxies']
+        name, kind = selected_leaf(proxies, MAIN_GROUP)
+        game_name, _ = selected_leaf(proxies, GAME_GROUP)
+        if kind != 'Mieru' or name == game_name:
+            return None, {'reason': 'non_mieru_or_game_only_selection'}
+        results = []
+        for url in ('https://www.google.com/generate_204', 'https://www.gstatic.com/generate_204'):
+            path = '/proxies/' + urllib.parse.quote(name, safe='') + '/delay?'
+            path += urllib.parse.urlencode({'url': url, 'timeout': 5000})
+            try:
+                result = self.api(path)
+                ok = isinstance(result.get('delay'), (int, float)) and result['delay'] >= 0
+                results.append({'host': urllib.parse.urlsplit(url).hostname, 'delay_ms': result.get('delay'), 'ok': ok})
+                if ok:
+                    return True, {'node': name, 'results': results}
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                results.append({'host': urllib.parse.urlsplit(url).hostname, 'error': type(exc).__name__})
+        return False, {'node': name, 'results': results}
+
+    def safe_resources(self):
+        mem = {x.split(':')[0]: int(x.split()[1]) for x in Path('/proc/meminfo').read_text().splitlines()}
+        if mem['MemAvailable'] < 128 * 1024:
+            return False
+        try:
+            health = json.loads(Path('/tmp/codex-media-protection.json').read_text())
+            if 0 <= time.time() - health['epoch'] < 45:
+                m = health['measurements']
+                peak = m.get('max_core_busy_percent')
+                if peak is None or peak >= 95 or m.get('network_softirq_hotspot', False) or m['cpu_busy_percent'] >= 85 or m['iowait_percent'] >= 20 or health['stopped_by_guard']:
+                    return False
+        except (OSError, ValueError, KeyError):
+            return False  # Do not restart a live core without fresh resource evidence.
+        else:
+            if not 0 <= time.time() - health['epoch'] < 45:
+                return False
+        return True
+
+    def save(self, state):
+        state['epoch'] = time.time()
+        target = STATE.with_suffix('.new')
+        target.write_text(json.dumps(state, ensure_ascii=False), encoding='utf-8')
+        os.replace(target, STATE)
+
+    def restart(self):
+        self.api('/restart', 'POST')
+        subprocess.run(['logger', '-t', 'openclash-wan-recover',
+                        'Requested one core restart after WAN change, direct OK and three proxy failures'], check=False)
+
+
+def tick(state, snap, now, runtime):
+    """Only the pending WAN-change window permits network probes or recovery."""
+    if not state or state.get('uptime', now) > now:
+        return {'phase': 'baseline', 'wan': snap['wan'], 'event': snap['event'], 'core': snap['core'],
+                'uptime': now, 'failures': 0, 'last_attempt': None, 'attempted': False}
+    state = dict(state)
+    state['uptime'] = now
+    changed = state.get('wan') != snap['wan'] or state.get('event') != snap['event']
+    if changed:
+        state.update(wan=snap['wan'], event=snap['event'], settle_until=now + SETTLE,
+                     pending_until=now + WINDOW, failures=0, attempted=False, last_probe=0)
+    if state.get('core') != snap['core']:
+        state.update(core=snap['core'], failures=0, settle_until=now + SETTLE)
+    if not snap['ready']:
+        state.update(phase='wan_not_ready', failures=0)
+    elif not snap['enabled'] or not snap['core']:
+        state.update(phase='openclash_not_ready', failures=0)
+    elif now >= state.get('pending_until', 0):
+        state.update(phase='idle', failures=0)
+    elif now < state.get('settle_until', 0) or now < 180:
+        state['phase'] = 'settling'
+    elif now - state.get('last_probe', 0) < INTERVAL:
+        pass
+    else:
+        state['last_probe'] = now
+        direct_ok, state['direct_probe'] = runtime.direct()
+        if not direct_ok:
+            state.update(phase='direct_unavailable', failures=0)
+            return state
+        previous_node = state.get('proxy_probe', {}).get('node')
+        proxy_ok, state['proxy_probe'] = runtime.proxy()
+        if previous_node != state['proxy_probe'].get('node'):
+            state['failures'] = 0
+        if proxy_ok is None:
+            state.update(phase='selection_not_eligible', failures=0)
+        elif proxy_ok:
+            state.update(phase='healthy_after_wan_change', failures=0)
+        else:
+            state['failures'] += 1
+            state['phase'] = 'proxy_failed'
+            if state['failures'] < 3:
+                return state
+            if state.get('attempted'):
+                state['phase'] = 'attempt_already_used'
+            elif state.get('last_attempt') is not None and now - state['last_attempt'] < COOLDOWN:
+                state['phase'] = 'cooldown'
+            elif not runtime.safe_resources():
+                state['phase'] = 'resources_busy'
+            else:
+                again = runtime.snapshot()
+                if again != snap:
+                    state.update(phase='state_changed_during_probe', failures=0)
+                    return state
+                # Commit the attempt before the API call, including ambiguous timeout responses.
+                state.update(phase='restart_requested', last_attempt=now, attempted=True, failures=0)
+                runtime.save(state)
+                try:
+                    runtime.restart()
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    state.update(phase='restart_result_unknown', error_type=type(exc).__name__)
+    return state
+
+
+def main():
+    os.umask(0o077)
+    os.nice(10)
+    signal.alarm(50)
+    with open('/tmp/openclash-wan-recover.lock', 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        runtime = Runtime()
+        if sys.argv[1:] == ['--probe-only']:
+            direct = runtime.direct()
+            proxy = runtime.proxy()
+            print(json.dumps({'direct': direct, 'proxy': proxy, 'resources_allow_recovery': runtime.safe_resources()}, ensure_ascii=False))
+            return
+        try:
+            state = json.loads(STATE.read_text())
+        except (OSError, ValueError):
+            state = {}
+        try:
+            state = tick(state, runtime.snapshot(), time.monotonic(), runtime)
+        except Exception as exc:
+            state.update(phase='diagnostic_error', error_type=type(exc).__name__, failures=0)
+        runtime.save(state)
+
+
+if __name__ == '__main__':
+    main()

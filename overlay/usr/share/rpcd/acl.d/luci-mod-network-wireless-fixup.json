@@ -1,0 +1,19 @@
+{
+	"luci-mod-network-wireless-fixup": {
+		"description": "Grant the wireless page ubus calls that no shipped ACL group covers",
+		"read": {
+			"ubus": {
+				"iwinfo": [ "devices", "info" ],
+				"network.wireless": [ "status" ],
+				"network.device": [ "status" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"network": [ "reload" ],
+				"uci": [ "revert" ]
+			},
+			"uci": [ "wireless", "network" ]
+		}
+	}
+}

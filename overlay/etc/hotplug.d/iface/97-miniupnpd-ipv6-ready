@@ -1,0 +1,4 @@
+#!/bin/sh
+case "$ACTION" in ifup|ifupdate) ;; *) exit 0 ;; esac
+case "$INTERFACE" in lan|pcdn1|2_1|2_1v6) ;; *) exit 0 ;; esac
+/usr/libexec/miniupnpd-ipv6-ready >/dev/null 2>&1 &

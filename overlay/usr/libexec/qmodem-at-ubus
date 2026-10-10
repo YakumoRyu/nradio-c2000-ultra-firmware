@@ -1,0 +1,8 @@
+#!/bin/sh
+# Use the daemon's persistent port, without opening/closing it per AT request.
+set -eu
+[ "$#" = 2 ] || exit 2
+request=$(jq -cn --arg port "$1" --arg command "$2" '{at_port:$port,at_cmd:$command,timeout:5}')
+reply=$(ubus -t 7 call at-daemon sendat "$request") || exit 1
+[ "$(printf '%s' "$reply" | jsonfilter -e '@.status')" = success ] || exit 1
+printf '%s' "$reply" | jsonfilter -e '@.response'

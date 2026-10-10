@@ -1,0 +1,15 @@
+--- a/mt_wifi/chip/mcu/cmm_fw_uni_event.c
++++ b/mt_wifi/chip/mcu/cmm_fw_uni_event.c
+@@ -8282,8 +8282,10 @@
+ 			|| IS_ENTRY_REPEATER(pEntry)) && pEntry->Sst == SST_ASSOC) {
+ 			struct UNI_EVENT_ONE_STA_RX_MPDU_COUNT_T *prRxMpduCountResult =
+ 				(struct UNI_EVENT_ONE_STA_RX_MPDU_COUNT_T *)&prEventResult->rRxMpduCountResult[Idx];
+-			if (le2cpu32(prRxMpduCountResult->u4RxTotalMpduCount >
+-					le2cpu32(prRxMpduCountResult->u4RxSuccessMpduCount)))
++			/* Each station must start at zero, including all-success reports. */
++			RxFailCount = 0;
++			if (le2cpu32(prRxMpduCountResult->u4RxTotalMpduCount) >
++					le2cpu32(prRxMpduCountResult->u4RxSuccessMpduCount))
+ 				RxFailCount = le2cpu32(prRxMpduCountResult->u4RxTotalMpduCount) -
+ 								le2cpu32(prRxMpduCountResult->u4RxSuccessMpduCount);
+ 			pEntry->RxFailCount += RxFailCount;

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+repo=/overlay/ultra-packages
+file=/etc/opkg/distfeeds.conf
+temp="$file.ultra-new"
+umask 022
+mkdir -p /etc/opkg
+printf '# Matching optional Ultra packages; regenerate with ultra-package-feeds.\n' > "$temp"
+[ ! -f "$file" ] || grep -vE '^src/gz ultra_|^# Matching|^# Extract' "$file" >> "$temp" || true
+if [ -f "$repo/RELEASE" ] && [ "$(cat "$repo/RELEASE")" = ultra-25.12-20261009-r2 ]; then
+ for dir in "$repo"/*; do
+  [ -f "$dir/Packages.gz" ] && [ -f "$dir/Packages.sig" ] || continue
+  name="${dir##*/}"
+  case "$name" in *[!a-zA-Z0-9_-]*) continue;; esac
+  printf 'src/gz ultra_%s file://%s\n' "$name" "$dir" >> "$temp"
+ done
+fi
+chmod 644 "$temp"
+mv "$temp" "$file"

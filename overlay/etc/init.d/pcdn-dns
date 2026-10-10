@@ -1,0 +1,21 @@
+#!/bin/sh /etc/rc.common
+START=96
+STOP=09
+USE_PROCD=1
+start_service() {
+    [ -f /etc/pcdn-dns.conf ] && [ -f /etc/pcdn-dns.nft ] || return 0
+    /usr/sbin/dnsmasq --test --conf-file=/etc/pcdn-dns.conf || return 1
+    /usr/sbin/nft -c -f /etc/pcdn-dns.nft || return 1
+    procd_open_instance
+    procd_set_param command /usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/pcdn-dns.conf
+    procd_set_param respawn
+    procd_set_param file /etc/pcdn-dns.conf
+    procd_close_instance
+    /usr/sbin/nft -f /etc/pcdn-dns.nft
+}
+stop_service() {
+    /usr/sbin/nft delete table inet codex_pcdn_dns 2>/dev/null || true
+}
+service_triggers() {
+    procd_add_reload_interface_trigger lan
+}

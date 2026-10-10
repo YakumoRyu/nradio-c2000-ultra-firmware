@@ -1,0 +1,32 @@
+{
+  "release": "ultra-25.12-20261009-r2",
+  "model": "NRadio-C2000MAX-Ultra",
+  "system": "ImmortalWrt 25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "webui_upstream_tag": "v3.0.2",
+  "webui_upstream_commit": "4bf3ae253d7ba98cb5a4c5f2a545b40610a4fbcd",
+  "webui_local_package_version": "3.0.2-r2",
+  "image_bytes": 215932127,
+  "companion_bytes": 151030170,
+  "image_structure_and_ABI_checks_passed": 83,
+  "privacy_files_scanned": 6996,
+  "private_value_hits": 0,
+  "userspace_execution_checks": 18,
+  "webui_installed_and_verified_on_running_router": true,
+  "managed_binary_loaded_verified": true,
+  "original_login_preserved": true,
+  "sms_read_and_delivery_flags_preserved": true,
+  "vantage_installed": false,
+  "only_QModem_holds_AT_serial_port": true,
+  "new_image_flashed": false,
+  "new_image_hardware_boot_verified": false,
+  "public_image_contains_personal_configuration": false,
+  "matching_optional_repository_separate": true,
+  "limitations": [
+    "No real new incoming SMS could be generated; simultaneous Web view and PushPlus reception remains unverified.",
+    "SMS sending/deletion, live cell scanning and band locking were not exercised on the production SIM.",
+    "The whole new image was not flashed or booted; factory reset was not executed.",
+    "B025 does not answer AT^TXPOWER? or AT^CASCELLINFO?; the WebUI still loads and uses available status queries."
+  ],
+  "passed_for_compile_and_delivery": true
+}

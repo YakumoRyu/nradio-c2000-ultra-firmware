@@ -1,0 +1,2 @@
+config app 'main'
+	option enabled '0'

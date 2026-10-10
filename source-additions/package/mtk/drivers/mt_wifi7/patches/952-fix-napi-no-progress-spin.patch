@@ -1,0 +1,40 @@
+--- a/wlan_hwifi/bus/mtk_pci_dma.c
++++ b/wlan_hwifi/bus/mtk_pci_dma.c
+@@ -1751,12 +1751,14 @@
+ 	struct pci_trans *trans;
+ 	struct pci_irq_vector_data *vec_data;
+ 	int done = 0, cur;
++	u32 start_head;
+ 	struct pci_rx_queue *rq;
+ 
+ 	trans = container_of(napi->dev, struct pci_trans, napi_dev);
+ 	q = container_of(napi, struct pci_queue, napi);
+ 	vec_data = &trans->vec_data[q->vec_id];
+ 	rq = (struct pci_rx_queue *)q;
++	start_head = q->head;
+ 
+ 	q->tail = bus_get_field(to_bus_trans(trans),
+ 			q->hw_didx_addr, q->hw_didx_mask);
+@@ -1775,12 +1777,18 @@
+ 		q->tail = bus_get_field(to_bus_trans(trans),
+ 				q->hw_didx_addr, q->hw_didx_mask);
+ 
+-		/* reschedule if ring is not empty */
+-		if (((q->head + 1) % q->q_size) != q->tail)
++		/* A producer index can be ahead of descriptor ownership (e.g.
++		 * WED TX-free completion). Returning a full budget without
++		 * consuming a descriptor leaves this NAPI instance spinning
++		 * forever. Re-arm its completion interrupt if no progress was
++		 * possible; only repoll a non-empty ring after real progress.
++		 */
++		if (q->head != start_head &&
++		    ((q->head + 1) % q->q_size) != q->tail)
+ 			return budget;
+ 
+-		napi_complete(napi);
+-		pci_dma_irq_enable(vec_data, q->hw_int_mask);
++		if (napi_complete_done(napi, done))
++			pci_dma_irq_enable(vec_data, q->hw_int_mask);
+ 	}
+ 	return done;
+ }

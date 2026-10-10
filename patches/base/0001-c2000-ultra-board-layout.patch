@@ -1,0 +1,149 @@
+diff --git a/package/base-files/files/lib/upgrade/emmc.sh b/package/base-files/files/lib/upgrade/emmc.sh
+index fc40f3c..70de979 100644
+--- a/package/base-files/files/lib/upgrade/emmc.sh
++++ b/package/base-files/files/lib/upgrade/emmc.sh
+@@ -33,6 +33,13 @@ emmc_upgrade_tar() {
+ 		export EMMC_ROOTFS_BLOCKS=$(($(tar x${gz}f "$tar_file" ${board_dir}/root -O | dd of="$EMMC_ROOT_DEV" bs=512 2>&1 | grep "records out" | cut -d' ' -f1)))
+ 		# Account for 64KiB ROOTDEV_OVERLAY_ALIGN in libfstools
+ 		EMMC_ROOTFS_BLOCKS=$(((EMMC_ROOTFS_BLOCKS + 127) & ~127))
++		# Some TF boards reserve a fixed data offset across image-size changes.
++		# The platform checks payload size before any write; use the same boundary
++		# for reset/config backup as libfstools uses when mounting rootfs_data.
++		if [ -n "$EMMC_ROOTFS_DATA_OFFSET" ]; then
++			[ "$EMMC_ROOTFS_BLOCKS" -le "$((EMMC_ROOTFS_DATA_OFFSET / 512))" ] || return 1
++			EMMC_ROOTFS_BLOCKS=$((EMMC_ROOTFS_DATA_OFFSET / 512))
++		fi
+ 		sync
+ 	}
+ 	[ "$has_dtb" = 1 -a "$EMMC_DTB_DEV" ] &&
+diff --git a/package/system/fstools/Makefile b/package/system/fstools/Makefile
+index 0de2408..fca1350 100644
+--- a/package/system/fstools/Makefile
++++ b/package/system/fstools/Makefile
+@@ -8,7 +8,7 @@
+ include $(TOPDIR)/rules.mk
+ 
+ PKG_NAME:=fstools
+-PKG_RELEASE:=1
++PKG_RELEASE:=2
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL=$(PROJECT_GIT)/project/fstools.git
+diff --git a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+index 62bae36..bed7e9c 100644
+--- a/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
++++ b/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
+@@ -8,6 +8,10 @@ mediatek_setup_interfaces()
+ 	local board="$1"
+ 
+ 	case $board in
++	NRadio-C2000MAX-Ultra|NRadio-C2000Ultra)
++		# Both external ports are LAN by default; USB NCM is the cellular uplink.
++		ucidef_set_interfaces_lan_wan "eth0 eth1" "eth2"
++		;;
+ 	abt,asr3000|\
+ 	buffalo,wsr-6000ax8|\
+ 	cmcc,rax3000m|\
+diff --git a/target/linux/mediatek/filogic/base-files/etc/board.d/05_compat-version b/target/linux/mediatek/filogic/base-files/etc/board.d/05_compat-version
+index 333e023..ed32e00 100644
+--- a/target/linux/mediatek/filogic/base-files/etc/board.d/05_compat-version
++++ b/target/linux/mediatek/filogic/base-files/etc/board.d/05_compat-version
+@@ -5,6 +5,9 @@
+ board_config_update
+ 
+ case "$(board_name)" in
++	NRadio-C2000MAX-Ultra|NRadio-C2000Ultra)
++		ucidef_set_compat_version "2.0"
++		;;
+ 	bananapi,bpi-r3-mini|\
+ 	cetron,ct3003-ubootmod|\
+ 	cmcc,a10-ubootmod|\
+diff --git a/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh b/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
+index a384c11..0624057 100644
+--- a/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
++++ b/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
+@@ -99,6 +99,13 @@ platform_do_upgrade() {
+ 	local board=$(board_name)
+ 
+ 	case "$board" in
++	NRadio-C2000MAX-Ultra|NRadio-C2000Ultra)
++		CI_ROOTDEV="mmcblk0"
++		CI_KERNPART="kernel"
++		CI_ROOTPART="rootfs_2nd"
++		EMMC_ROOTFS_DATA_OFFSET=536870912
++		emmc_do_upgrade "$1"
++		;;
+ 	abt,asr3000|\
+ 	acer,predator-w6x-ubootmod|\
+ 	aigo,ags21|\
+@@ -328,6 +335,19 @@ platform_check_image() {
+ 	[ "$#" -gt 1 ] && return 1
+ 
+ 	case "$board" in
++	NRadio-C2000MAX-Ultra|NRadio-C2000Ultra)
++		nand_do_platform_check "nradio_c2000ultra" "$1" || return 1
++		# Layout 2 images use the 512 MiB reservation; reject old-layout payloads.
++		local compat root_bytes kernel_bytes
++		compat=$(fwtool -i /dev/stdout "$1" 2>/dev/null | jsonfilter -e '@.compat_version')
++		[ "$compat" = "2.0" ] || { echo "Unsupported Ultra TF layout; expected compatibility 2.0" >&2; return 1; }
++		root_bytes=$(tar tvf "$1" sysupgrade-nradio_c2000ultra/root 2>/dev/null | awk '{print $3}')
++		kernel_bytes=$(tar tvf "$1" sysupgrade-nradio_c2000ultra/kernel 2>/dev/null | awk '{print $3}')
++		case "$root_bytes:$kernel_bytes" in *[!0-9:]*|:*|*:) return 1;; esac
++		[ "$root_bytes" -gt 0 ] && [ "$root_bytes" -le 536870912 ] &&
++			[ "$kernel_bytes" -gt 0 ] && [ "$kernel_bytes" -lt 33554432 ]
++		return $?
++		;;
+ 	abt,asr3000|\
+ 	acer,predator-w6x-ubootmod|\
+ 	aigo,ags21|\
+@@ -420,6 +440,12 @@ platform_check_image() {
+ 
+ platform_copy_config() {
+ 	case "$(board_name)" in
++	NRadio-C2000MAX-Ultra|NRadio-C2000Ultra)
++		CI_ROOTDEV="mmcblk0"
++		CI_KERNPART="kernel"
++		CI_ROOTPART="rootfs_2nd"
++		emmc_copy_config
++		;;
+ 	acer,predator-w6|\
+ 	acer,predator-w6d|\
+ 	acer,vero-w6m|\
+diff --git a/target/linux/mediatek/image/filogic-ext.mk b/target/linux/mediatek/image/filogic-ext.mk
+index b778e69..c8dbcca 100644
+--- a/target/linux/mediatek/image/filogic-ext.mk
++++ b/target/linux/mediatek/image/filogic-ext.mk
+@@ -316,3 +316,33 @@ define Device/zhao_7981r128-mtkuboot
+   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+ endef
+ TARGET_DEVICES += zhao_7981r128-mtkuboot
++
++# Private candidate for the existing NRadio TF layout; not a factory image.
++
++# Private 25.12 adaptation for the existing NRadio TF layout; not a factory image.
++
++# Private 25.12 adaptation for the existing NRadio TF layout; not a factory image.
++
++# Private 25.12 adaptation for the existing NRadio TF layout; not a factory image.
++
++# Private 25.12 adaptation for the existing NRadio TF layout; not a factory image.
++
++# Private 25.12 adaptation for the existing NRadio TF layout; not a factory image.
++define Device/nradio_c2000ultra
++  DEVICE_VENDOR := NRadio
++  DEVICE_MODEL := C2000MAX-Ultra
++  DEVICE_VARIANT := (25.12 Ultra fixes 20261007)
++  DEVICE_COMPAT_VERSION := 2.0
++  DEVICE_COMPAT_MESSAGE := The Ultra TF layout reserves 512 MiB for firmware. Back up data before migrating from older images.
++  DEVICE_DTS := mt7987a-nradio-c2000ultra
++  DEVICE_DTS_DIR := ../dts-ext
++  SUPPORTED_DEVICES := NRadio-C2000MAX-Ultra NRadio-C2000Ultra
++  DEVICE_PACKAGES := kmod-usb3 kmod-usb-net-huawei-cdc-ncm kmod-hwmon-pwmfan \
++	 kmod-mt798x-2p5g-phy kmod-phy-airoha-en8811h airoha-en8811h-firmware
++  KERNEL_LOADADDR := 0x48000000
++  KERNEL_INITRAMFS_SUFFIX := -recovery.itb
++  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
++  ARTIFACTS := kernel.itb
++  ARTIFACT/kernel.itb := append-kernel
++endef
++TARGET_DEVICES += nradio_c2000ultra

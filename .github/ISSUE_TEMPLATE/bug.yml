@@ -1,0 +1,28 @@
+name: 故障反馈
+description: 提交可复现的固件或 WebUI 问题
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 设备型号与固件版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 触发步骤、实际表现和预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志或截图
+      description: 请移除密码、Token、订阅、手机号码、短信内容、IMEI/IMSI、私人域名及设备校准数据。
+  - type: dropdown
+    id: boot
+    attributes:
+      label: 启动介质
+      options:
+        - TF 系统
+        - 内置官方系统
+        - 不确定

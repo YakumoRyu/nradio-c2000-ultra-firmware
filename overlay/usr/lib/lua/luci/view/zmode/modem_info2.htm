@@ -1,0 +1,88 @@
+<%+header%>
+<div class="embedded-web-page">
+    <iframe
+        id="embedded-iframe"
+        src=""
+        title="mwrt-info">
+    </iframe>
+</div>
+<style>
+    #embedded-iframe {
+        position: fixed;
+        top: 0;
+        left: 15rem;                 /* 跟随侧栏宽度的兜底值（JS 会按实际像素精确校正）*/
+        width: calc(100% - 15rem);
+        height: 100vh;
+        border: none;
+        z-index: 9999;
+        background: #0d1117;         /* 加载时与深色主题一致，避免白闪 */
+        transition: left .25s ease, width .25s ease;
+    }
+    @media (max-width: 768px) {
+        #embedded-iframe { left: 0; width: 100%; }
+    }
+    .embedded-web-page { margin: 0; padding: 0; box-sizing: border-box; }
+</style>
+<script>
+(function () {
+    var iframe = document.getElementById('embedded-iframe');
+    // 跟随浏览器当前访问 LuCI 的主机，而不是写死 192.168.88.1，
+    // 这样改了 br-lan IP 后本页仍指向同一台设备的 Netdata(:19999)。
+    // 协议固定 http：netdata 只提供明文 HTTP，若跟随页面的 https 会握手失败
+    // （ERR_INVALID_HTTP_RESPONSE）。用 HTTP 打开 LuCI 即可正常内嵌。
+    if (iframe) {
+        iframe.src = 'http://' + window.location.hostname
+            + ':19999/#menu_system;theme=slate;help=false';
+    }
+    function sidebarWidth() {
+        // 优先用真实可见的侧栏容器；退而求其次用菜单 ul
+        var el = document.querySelector('.main .main-left')
+              || document.querySelector('.main-left')
+              || document.getElementById('mainmenu');
+        if (!el) return null;
+        var w = Math.round(el.getBoundingClientRect().width);
+        return w > 0 ? w : null;
+    }
+    function adjustIframePosition() {
+        if (!iframe) return;
+        // 窄屏：侧栏折叠，iframe 占满整宽
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            iframe.style.left = '0px';
+            iframe.style.width = '100%';
+            return;
+        }
+        var w = sidebarWidth();
+        if (w === null) return;          // 拿不到就保留 CSS 兜底，不强行置 0
+        iframe.style.left = w + 'px';
+        iframe.style.width = 'calc(100% - ' + w + 'px)';
+    }
+    // 初次：DOM 就绪 + 稍后再校正几次（等菜单 JS 渲染完）
+    document.addEventListener('DOMContentLoaded', function () {
+        adjustIframePosition();
+        setTimeout(adjustIframePosition, 60);
+        setTimeout(adjustIframePosition, 300);
+    });
+    window.addEventListener('load', adjustIframePosition);
+    // 缩放/窗口变化：节流校正
+    var t = null;
+    window.addEventListener('resize', function () {
+        if (t) clearTimeout(t);
+        t = setTimeout(adjustIframePosition, 50);
+    });
+    // 侧栏尺寸或类名变化（折叠、字号、缩放重排）：用 ResizeObserver 实时跟随
+    function watchSidebar() {
+        var sidebar = document.querySelector('.main .main-left')
+                   || document.querySelector('.main-left');
+        if (!sidebar) { setTimeout(watchSidebar, 200); return; }
+        if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(adjustIframePosition).observe(sidebar);
+        }
+        // 兜底：监听类/属性变化（如折叠态切换）
+        new MutationObserver(adjustIframePosition)
+            .observe(sidebar, { attributes: true, attributeFilter: ['class', 'style'] });
+        adjustIframePosition();
+    }
+    watchSidebar();
+})();
+</script>
+<%+footer%>

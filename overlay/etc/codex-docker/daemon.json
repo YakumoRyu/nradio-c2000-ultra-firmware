@@ -1,0 +1,23 @@
+{
+  "data-root": "/overlay/docker-data",
+  "exec-root": "/var/run/codex-docker",
+  "pidfile": "/var/run/codex-docker/dockerd.pid",
+  "hosts": [
+    "unix:///var/run/docker.sock"
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "5m",
+    "max-file": "2"
+  },
+  "iptables": false,
+  "ip6tables": false,
+  "bridge": "none",
+  "default-address-pools": [
+    {
+      "base": "172.30.0.0/16",
+      "size": 24
+    }
+  ],
+  "storage-driver": "overlay2"
+}

@@ -1,0 +1,31 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const root = path.join(__dirname, '../webui');
+const ts = require(path.join(root, 'node_modules/typescript'));
+const contextFor = (rel) => {
+  const exports = {};
+  const source = fs.readFileSync(path.join(root,rel),'utf8').replaceAll('import.meta.env.BASE_URL',JSON.stringify('/5700/'));
+  const code = ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  const scope = {exports, require(name){
+    if(name==='node-pdu')return require(path.join(root,'node_modules/node-pdu'));
+    if(name.includes('mockAT'))return {isMockModeEnabled:()=>false};
+    return {};
+  },console,setTimeout,clearTimeout,setInterval,clearInterval,localStorage:{getItem:()=>null},window:{location:{hostname:'test',protocol:'http:'}}};
+  vm.runInNewContext(code,scope,{filename:rel});return exports;
+};
+const sms = contextFor('src/modem/sms.ts');
+const rows=[{index:1000007,number:'+8612345678901',content:'离线测试 ERROR OK',time:'1700000000',type:'received',is_read:true,isComplete:true}];
+const parsed=sms.parseCMGL(JSON.stringify(rows));
+assert.equal(parsed.length,1);assert.equal(parsed[0].index,1000007);assert.equal(parsed[0].content,rows[0].content);assert.equal(parsed[0].is_read,true);
+assert.equal(sms.parseCMGL('[]').length,0);
+assert.equal(sms.parseCMGL(JSON.stringify([{...rows[0],index:7}])).length,0);
+assert.equal(sms.parseMessageTime('1700000000').getTime(),1700000000000);
+assert.equal(sms.parseMessageTime('1700000000000').getTime(),1700000000000);
+const {WebSocketATAdapter}=contextFor('src/services/at.ts');
+const adapter=new WebSocketATAdapter({skipConfig:true});let result;
+adapter.smsCollecting=true;adapter.smsResolve=r=>result=r;adapter.collectSMSChunk(JSON.stringify(rows));
+assert.equal(result.success,true);assert.equal(result.data,JSON.stringify(rows));assert.equal(adapter.smsCollecting,false);
+adapter.smsCollecting=true;adapter.smsResolve=r=>result=r;adapter.collectSMSChunk('[]');assert.equal(result.data,'[]');
+console.log('7 frontend shared-SMS and completion checks passed');

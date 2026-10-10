@@ -1,0 +1,67 @@
+#!/usr/bin/python3
+"""Recover IPv6 SSDP once LAN addresses exist; never reset the modem or network."""
+import fcntl,ipaddress,json,os,subprocess,time
+from pathlib import Path
+STATE=Path('/tmp/miniupnpd-ipv6-ready.json')
+def run(args):
+ p=subprocess.run(args,capture_output=True,text=True,timeout=12)
+ return p.stdout.strip() if p.returncode==0 else ''
+def pid():
+ ids=run(['pidof','miniupnpd']).split()
+ return ids[0] if len(ids)==1 else None
+def has_ssdp6(process):
+ if not process:return False
+ inodes=set()
+ try:
+  for fd in Path('/proc/'+process+'/fd').iterdir():
+   try:target=os.readlink(fd)
+   except OSError:continue
+   if target.startswith('socket:['):inodes.add(target[8:-1])
+  for line in Path('/proc/net/udp6').read_text().splitlines()[1:]:
+   row=line.split()
+   if len(row)>9 and row[1].endswith(':076C') and row[9] in inodes:return True
+ except FileNotFoundError:return False
+ return False
+def save(value):
+ tmp=STATE.with_suffix('.tmp');tmp.write_text(json.dumps(value));os.replace(tmp,STATE)
+def main():
+ with open('/tmp/miniupnpd-ipv6-ready.lock','w') as lock:
+  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  except BlockingIOError:return
+  proc=pid()
+  if not proc:return
+  old=json.loads(STATE.read_text()) if STATE.exists() else {}
+  state={'epoch':time.time(),'pid':proc,'last_restart_uptime':old.get('last_restart_uptime',-1000),'active_lan_ipv6':old.get('active_lan_ipv6')}
+  conf=Path('/var/etc/miniupnpd.conf').read_text()
+  if 'ipv6_disable=no' not in conf or 'enable_upnp=yes' not in conf:return
+  interfaces=[x.split('=',1)[1] for x in conf.splitlines() if x.startswith('listening_ip=')]
+  addresses=json.loads(run(['ip','-j','-6','addr','show']))
+  ready=set();lan_ipv6={}
+  for row in addresses:
+   for a in row.get('addr_info',[]):
+    ip=ipaddress.ip_address(a['local'])
+    if ip.is_global and a.get('preferred_life_time',1)!=0 and 'tentative' not in a.get('flags',[]):
+     ready.add(row['ifname'])
+     if row['ifname'] in interfaces:lan_ipv6.setdefault(row['ifname'],[]).append(str(ip))
+  for values in lan_ipv6.values():values.sort()
+  state['observed_lan_ipv6']=lan_ipv6
+  if not interfaces or not set(interfaces)<=ready:
+   save(state|{'phase':'waiting_for_lan_ipv6'});return
+  socket_ready=has_ssdp6(proc)
+  prefix_changed=old.get('pid')==proc and old.get('active_lan_ipv6') is not None and old['active_lan_ipv6']!=lan_ipv6
+  if socket_ready and not prefix_changed:
+   save(state|{'phase':'ipv6_ssdp_ready','active_lan_ipv6':lan_ipv6});return
+  uptime=float(Path('/proc/uptime').read_text().split()[0])
+  if uptime-state['last_restart_uptime']<300:
+   save(state|{'phase':'retry_cooldown'});return
+  state['last_restart_uptime']=uptime;state['phase']='restarting_upnp_after_ipv6_ready';save(state)
+  reason='LAN IPv6 prefix changed' if prefix_changed else 'IPv6 SSDP socket is missing after LAN IPv6 became ready'
+  state['reason']=reason;save(state)
+  run(['logger','-t','miniupnpd-ipv6-ready',reason+'; restarting UPnP once'])
+  subprocess.run(['/etc/init.d/miniupnpd','restart'],check=True,timeout=20,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+  for _ in range(10):
+   time.sleep(1);current=pid()
+   if has_ssdp6(current):
+    save(state|{'pid':current,'phase':'ipv6_ssdp_ready_after_restart','active_lan_ipv6':lan_ipv6});return
+  save(state|{'pid':pid(),'phase':'ipv6_ssdp_still_missing'})
+if __name__=='__main__':main()

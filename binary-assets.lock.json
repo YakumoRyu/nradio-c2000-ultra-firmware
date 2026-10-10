@@ -1,0 +1,135 @@
+{
+  "note": "Skipped binary inputs are documented separately from maintained source; no private data is exported.",
+  "upstream_verified_inputs": {
+    "cloudflared": {
+      "official_release": "2026.9.3",
+      "asset": "cloudflared-linux-arm64",
+      "bytes": 37685657,
+      "sha256": "aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d",
+      "official_digest_matched": true
+    },
+    "passed": true
+  },
+  "excluded_overlay_inputs": [
+    {
+      "path": "etc/wireless/l1profile.dat",
+      "kind": "binary_asset",
+      "bytes": 594,
+      "sha256": "7731cd78134ebb90960246868982184e0e058a788112fe53651e6e7c48ef9b17"
+    },
+    {
+      "path": "etc/openclash/GeoIP.dat",
+      "kind": "binary_asset",
+      "bytes": 16514644,
+      "sha256": "3e21484fe4b72d788439e6f16a29bf7967892dd9e82f17e087608837cb260639"
+    },
+    {
+      "path": "etc/openclash/GeoSite.dat",
+      "kind": "binary_asset",
+      "bytes": 10596142,
+      "sha256": "471a22237ae0fd4be4e1b54eb9b4a389edf4b07e454acba7e34576f8fee63f40"
+    },
+    {
+      "path": "etc/openclash/Country.mmdb",
+      "kind": "binary_asset",
+      "bytes": 8321387,
+      "sha256": "3b8c7c4029faa8b6c76300d586a4f24efb3d83b06a4e3892b3a5bce41ab74ff0"
+    },
+    {
+      "path": "etc/openclash/core/clash_meta",
+      "kind": "binary_asset",
+      "bytes": 57409662,
+      "sha256": "c80df2ca5159567804da883401e0118908fc1155e05df2baf3dbd4d3ecfc3754"
+    },
+    {
+      "path": "etc/wireless/mediatek/mt7992.1.dat",
+      "kind": "binary_asset",
+      "bytes": 223,
+      "sha256": "387b8ed03d6bd8bffeabd3d7b32fbb2c648559a3faa5cc9dd65649a7eb5484fb"
+    },
+    {
+      "path": "usr/bin/sendat2",
+      "kind": "binary_asset",
+      "bytes": 8557,
+      "sha256": "fe64dfc6ec3ef71d0e20f0306a49fd639be5d145642b50cb449e19a3ca179845"
+    },
+    {
+      "path": "usr/bin/pdu_decoder2",
+      "kind": "binary_asset",
+      "bytes": 12387,
+      "sha256": "a56e36e7409311184a9c24e11b3208ef90c78e8efdfefa14e3bd50193fef93c8"
+    },
+    {
+      "path": "usr/bin/lastlog",
+      "kind": "binary_asset",
+      "bytes": 66811,
+      "sha256": "314d8a764be07cd86fb8c7d41e59c55eebdbecd87cb80c340e1139ec07fa70aa"
+    },
+    {
+      "path": "usr/bin/bdinfo1",
+      "kind": "binary_asset",
+      "bytes": 8115,
+      "sha256": "95163670497a62b598a4faccf0b45eef6ffc9094f53260ae0218d67da005c2b5"
+    },
+    {
+      "path": "usr/bin/bdinfoemmc",
+      "kind": "binary_asset",
+      "bytes": 8115,
+      "sha256": "fd3636a6b12b6c032404a6f9c6aae98a9e42692d35d63ae06db7f4bb59f1a71b"
+    },
+    {
+      "path": "usr/bin/cloudflared",
+      "kind": "binary_asset",
+      "bytes": 37685657,
+      "sha256": "aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/runc",
+      "kind": "binary_asset",
+      "bytes": 17586632,
+      "sha256": "d6c86fb2283b0b59239425470782ee91f3ce4058ad878832f61c107fa42285f9"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/docker-init",
+      "kind": "binary_asset",
+      "bytes": 601296,
+      "sha256": "e1d49695e72dfe945ba788bb60c990c7b2ed03da750eddb596f884c5979e0ef2"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/containerd-shim-runc-v2",
+      "kind": "binary_asset",
+      "bytes": 13435064,
+      "sha256": "82f757004d37235c8562d9644e57c7c58250ccb5844bdb8f27b6f876cc6d0238"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/containerd",
+      "kind": "binary_asset",
+      "bytes": 39649464,
+      "sha256": "5f4a549ce2ba01de18256c12c0d689c0aabbac37a0dcef75c69d74712ec1a833"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/docker",
+      "kind": "binary_asset",
+      "bytes": 40496832,
+      "sha256": "9bb9f26fc5c5bab24403c32f11613bc4ed0c0cacb3cc3c051066a24e343d5e19"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/ctr",
+      "kind": "binary_asset",
+      "bytes": 20250808,
+      "sha256": "4e2bc831689e94df4327086361507b78b452ca327b7a6ce1abfa7c44fda0a5ed"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/dockerd",
+      "kind": "binary_asset",
+      "bytes": 75818592,
+      "sha256": "6ab67d885dd326fb3bcd273bd017c6cd2689aea0e1319ba30c8a5c4a30863d8c"
+    },
+    {
+      "path": "usr/lib/codex-docker/bin/docker-proxy",
+      "kind": "binary_asset",
+      "bytes": 2481807,
+      "sha256": "51a15776bc03d7476fd74953021584186ab00cb2cacc920e540ff534c39c9c3a"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "luci-app-ramfree": {
+    "description": "Read memory usage and release filesystem caches",
+    "read": {
+      "ubus": {
+        "system": [
+          "info"
+        ]
+      }
+    },
+    "write": {
+      "ubus": {
+        "file": [
+          "exec"
+        ]
+      },
+      "file": {
+        "/usr/libexec/ramfree": [
+          "exec"
+        ]
+      }
+    }
+  }
+}

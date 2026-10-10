@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""Permit PCDN IPv6 service ports only for learned, current-prefix client addresses."""
+import fcntl,ipaddress,json,os,subprocess,sys,time
+from pathlib import Path
+from pcdn_settings import config,enabled,macs,valid_name
+SET='pcdn_public_v6'
+LIST=Path('/tmp/pcdn-public-v6.list')
+STATE=Path('/tmp/pcdn-ipv6-access.json')
+def read(args):
+ p=subprocess.run(args,capture_output=True,text=True,timeout=8)
+ if p.returncode:raise RuntimeError('command failed: '+args[0])
+ return json.loads(p.stdout)
+def collect():
+ settings=config()
+ allowed_macs=macs(settings)
+ interfaces=settings.get('interface',[])
+ if isinstance(interfaces,str):interfaces=[interfaces]
+ interfaces={valid_name(x) for x in interfaces}
+ uplink=read(['ubus','call','network.interface.'+valid_name(settings.get('upstream','2_1v6')),'status'])
+ active_pools=[ipaddress.ip_network(x['address']+'/'+str(x['mask']),strict=False) for x in uplink.get('ipv6-prefix',[]) if ipaddress.ip_address(x['address']).is_global]
+ prefixes={}
+ for row in read(['ip','-j','-6','addr','show']):
+  dev=row['ifname']
+  if dev not in interfaces:continue
+  prefixes[dev]=[]
+  for addr in row.get('addr_info',[]):
+   ip=ipaddress.ip_address(addr['local'])
+   if ip.is_global and addr.get('valid_life_time',1)!=0:
+    prefixes[dev].append(ipaddress.ip_network(str(ip)+'/'+str(addr['prefixlen']),strict=False))
+ result={}
+ for row in read(['ip','-j','-6','neigh','show']):
+  dev=row.get('dev');states=row.get('state',[])
+  if isinstance(states,str):states=[states]
+  if dev not in prefixes or row.get('lladdr','').lower() not in allowed_macs:continue
+  if any(x in ('FAILED','INCOMPLETE') for x in states):continue
+  ip=ipaddress.ip_address(row['dst'])
+  if ip.is_global and any(ip in p for p in prefixes[dev]) and any(ip in p for p in active_pools):result[str(ip)]=dev
+ return result
+def atomic(path,text):
+ temp=path.with_suffix('.tmp');temp.write_text(text);os.chmod(temp,0o600);os.replace(temp,path)
+def main():
+ if not enabled(config()):return
+ with open('/tmp/pcdn-ipv6-access.lock','w') as lock:
+  try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  except BlockingIOError:return
+  clients=collect();ips=sorted(clients)
+  atomic(LIST,'\n'.join(ips)+'\n' if ips else '')
+  if '--prepare' not in sys.argv:
+   # One nft transaction avoids a partially applied address set.
+   script='flush set inet fw4 '+SET+'\n'
+   if ips:script+='add element inet fw4 '+SET+' { '+', '.join(ips)+' }\n'
+   p=subprocess.run(['nft','-f','-'],input=script,text=True,capture_output=True,timeout=8)
+   if p.returncode:raise RuntimeError('PCDN IPv6 nft set update failed')
+  atomic(STATE,json.dumps({'epoch':time.time(),'clients':clients,'ports':'TCP/UDP 1024-65535','rule_scope':'PCDN current public IPv6 addresses only'}))
+if __name__=='__main__':main()

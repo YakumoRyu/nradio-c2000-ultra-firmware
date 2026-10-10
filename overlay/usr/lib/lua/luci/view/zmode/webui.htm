@@ -1,0 +1,76 @@
+<%+header%>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPENWRT WEBUI</title>
+  <script>
+    // Defined in <head> so it exists before the iframe's load event can fire
+    // (the old inline onload raced the bottom-of-body <script> and threw
+    // "showHalfPage is not defined").
+    function showHalfPage() {
+      var m = document.getElementById('loadingMessage');
+      if (m) m.style.display = 'none';
+      var f = document.getElementById('embeddedPage');
+      if (f) f.style.transform = 'translateY(0)';
+    }
+  </script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    #loadingMessage {
+      margin-bottom: 20px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: white;
+      z-index: 10;
+    }
+
+    #embeddedPageContainer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #embeddedPage {
+      width: 100%;
+      height: 100%;
+      border: none;
+      transform: translateY(-570px);
+    }
+  </style>
+</head>
+<body>
+  <h2 style="background-color: rgb(83, 83, 83); color: white;">MT5700M-CN巴龙Web管理</h2>
+  <div id="loadingMessage">正在加载API...</div>
+  <div id="embeddedPageContainer">
+    <iframe id="embeddedPage" src=""></iframe>
+  </div>
+  <script>
+    (function () {
+      // The 5700 SPA lives at /www/5700 and is served SAME-ORIGIN by the main
+      // uhttpd (docroot /www, ports 80/443). Embedding it with a relative,
+      // scheme-and-host-less path makes the iframe follow whatever protocol and
+      // IP the browser used for LuCI itself -- so it adapts to any br-lan IP
+      // change AND avoids mixed content (an absolute http://host:8888 URL turned
+      // a same-origin embed into a cross-origin, cross-scheme one, which HTTPS
+      // blocks). Route is /network/info for this bundle.
+      var f = document.getElementById('embeddedPage');
+      // Attach the load handler before setting src so it can't be missed
+      // (fixes the old "showHalfPage is not defined" onload race).
+      f.addEventListener('load', showHalfPage);
+      f.src = '/5700/#/network/info';
+    })();
+  </script>
+</body>
+<%+footer%>

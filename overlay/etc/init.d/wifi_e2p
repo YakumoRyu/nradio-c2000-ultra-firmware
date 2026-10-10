@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+# Generate calibration from this device's read-only Factory partition.
+# A shareable image must never carry the builder's EEPROM or radio identity.
+START=07
+boot() {
+    . /lib/functions.sh
+    local dev size tmp
+    [ -s /lib/firmware/e2p ] && return 0
+    dev="$(find_mtd_part Factory)"
+    case "$dev" in /dev/mtdblock[0-9]*) dev="/dev/mtd${dev#/dev/mtdblock}";; /dev/mtd[0-9]*) ;; *) logger -t wifi_e2p 'Factory partition unavailable'; return 1;; esac
+    size="$(cat /sys/class/mtd/${dev#/dev/}/size 2>/dev/null)"
+    [ "$size" = 1048576 ] || { logger -t wifi_e2p 'Unexpected Factory size; refusing calibration extraction'; return 1; }
+    umask 077
+    tmp=/lib/firmware/e2p.new
+    dd if="$dev" of="$tmp" bs=65536 count=16 2>/dev/null || { rm -f "$tmp"; return 1; }
+    [ "$(wc -c < "$tmp")" = 1048576 ] || { rm -f "$tmp"; return 1; }
+    mv "$tmp" /lib/firmware/e2p
+}

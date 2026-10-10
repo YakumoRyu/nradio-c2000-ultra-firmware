@@ -1,0 +1,38 @@
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -6926,6 +6926,7 @@
+ 
+ static int mtk_add_mac(struct mtk_eth *eth, struct device_node *np)
+ {
++	const char *label = NULL;
+ 	const __be32 *_id = of_get_property(np, "reg", NULL);
+ 	struct device_node *pcs_np;
+ 	phy_interface_t phy_mode;
+@@ -6940,6 +6941,15 @@
+ 		return -EINVAL;
+ 	}
+ 
++	/* Keep a labelled pseudo-GMAC from consuming the USB modem ethN name. */
++	if (of_machine_is_compatible("NRadio-C2000MAX-Ultra") &&
++	    !of_property_read_string(np, "label", &label)) {
++		if (!dev_valid_name(label) || strchr(label, '%'))
++			return -EINVAL;
++	} else {
++		label = NULL;
++	}
++
+ 	id = be32_to_cpup(_id);
+ 	if (id >= MTK_MAX_DEVS) {
+ 		dev_err(eth->dev, "%d is not a valid mac id\n", id);
+@@ -6966,6 +6976,11 @@
+ 	mac->id = id;
+ 	mac->hw = eth;
+ 	mac->of_node = np;
++
++	if (label) {
++		strscpy(eth->netdev[id]->name, label, IFNAMSIZ);
++		eth->netdev[id]->name_assign_type = NET_NAME_PREDICTABLE;
++	}
+ 
+ 	/* Default GMAC->PPE mapping; overridable via gdm_ppe_cfg debugfs. */
+ 	if (!eth->soc->offload_version)

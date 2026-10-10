@@ -1,0 +1,33 @@
+--- a/mt_wifi/common/qos.c
++++ b/mt_wifi/common/qos.c
+@@ -595,6 +595,7 @@
+ {
+ 	struct wapp_event event;
+ 	struct wapp_qos_action_frame *req_data = NULL;
++	u8 *frame_data;
+ 
+ 	/*wapp event header+mscs_header len = 24*/
+ #ifndef offsetof
+@@ -609,6 +610,9 @@
+ 		return 1;
+ 	}
+ 
++	if (!wdev || !wdev->if_dev || !peer_mac_addr || !frm)
++		return 1;
++
+ 	NdisZeroMemory(&event, sizeof(event));
+ 	event.ifindex = RtmpOsGetNetIfIndex(wdev->if_dev);
+ 	event.event_id = WAPP_QOS_ACTION_FRAME_EVENT;
+@@ -619,7 +623,11 @@
+ 		req_data->frm_len = frm_len;
+ 		req_data->chan = channel;
+ 
+-		NdisCopyMemory(req_data->frm, frm, frm_len);
++		/* frm[0] is an ABI placeholder inside event.data. Address the
++		 * checked enclosing storage so FORTIFY sees its actual capacity. */
++		frame_data = (u8 *)&event + offsetof(struct wapp_event, data) +
++			offsetof(struct wapp_qos_action_frame, frm);
++		NdisCopyMemory(frame_data, frm, frm_len);
+ 		MTWF_DBG(NULL, DBG_CAT_PROTO, CATPROTO_QOS_MAP, DBG_LVL_INFO,
+ 			"to wapp, src mac:%02x:%02x:%02x:%02x:%02x:%02x, frm_len:%lu\n",
+ 			PRINT_MAC(req_data->src), frm_len);

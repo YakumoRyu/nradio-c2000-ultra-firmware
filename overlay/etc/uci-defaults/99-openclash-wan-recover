@@ -1,0 +1,8 @@
+#!/bin/sh
+# First-boot integration: preserve all existing system and application cron jobs.
+cron=/etc/crontabs/root
+job='* * * * * /usr/libexec/openclash-wan-recover >/dev/null 2>&1 #codex-wan-recover'
+mkdir -p /etc/crontabs
+umask 077
+grep -Fqx "$job" "$cron" 2>/dev/null || printf '\n%s\n' "$job" >> "$cron"
+exit 0

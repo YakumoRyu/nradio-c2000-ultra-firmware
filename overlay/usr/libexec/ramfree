@@ -1,0 +1,5 @@
+#!/bin/sh
+# Only reclaim clean filesystem caches; do not kill processes or disable swap.
+set -eu
+sync
+printf '3\n' > /proc/sys/vm/drop_caches

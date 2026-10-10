@@ -1,0 +1,807 @@
+<%+header%>
+
+<%
+-- 短信管理。
+--
+-- 数据不再走 action_smscs 那个文本块(发件人/时间/内容靠行号切,已读未读根本塞不
+-- 进去),改用 admin/modem/smslist 的 JSON —— 里面带 +CMGL 的 stat 位,长短信也已
+-- 经由 pdu_decoder 合成一条。发送走 admin/modem/smssend(POST,因为一条长中文短信
+-- urlencode 之后有好几 KB),删除走 admin/modem/smsdel。
+--
+-- 配色跟着 argon 走:强调色直接取主题的 --primary(「界面修改」改的就是它),深浅
+-- 色看页面背景的实际明暗 —— 不能问 prefers-color-scheme,本机的浅色皮会把主题按
+-- 在浅色上不跟系统走,那样会出现浅色页面里一堆深色卡片。
+%>
+
+<style>
+.sms {
+	--sms-accent: #388087;
+	--sms-accent-soft: rgba(56, 128, 135, .1);
+	--sms-on-accent: #fff;
+	--sms-danger: #e35d6a;
+	--sms-danger-soft: rgba(227, 93, 106, .1);
+	--sms-card: #fff;
+	--sms-line: rgba(15, 23, 32, .08);
+	--sms-txt: #1c2430;
+	--sms-dim: #77828f;
+	--sms-hover: rgba(15, 23, 32, .028);
+	--sms-mask: rgba(18, 26, 36, .38);
+	color: var(--sms-txt);
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+/* 深色由脚本按页面背景判定后加 .is-dark,见下面的 backdrop()。 */
+.sms.is-dark {
+	--sms-accent: #2bffc6;
+	--sms-accent-soft: rgba(43, 255, 198, .1);
+	--sms-on-accent: #06231d;
+	--sms-danger: #ff7d60;
+	--sms-danger-soft: rgba(255, 125, 96, .12);
+	--sms-card: #151b23;
+	--sms-line: rgba(255, 255, 255, .07);
+	--sms-txt: #e6edf3;
+	--sms-dim: #8b949e;
+	--sms-hover: rgba(255, 255, 255, .035);
+	--sms-mask: rgba(4, 8, 13, .55);
+}
+
+.sms * { box-sizing: border-box; }
+
+/* ---- 顶部 ------------------------------------------------------------- */
+
+.sms-head {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 1rem;
+	flex-wrap: wrap;
+	margin-bottom: .9rem;
+}
+/* argon-global-custom.css 给 h2 和所有 input 都挂了 !important(白底、药丸边框、
+   写死的字色);mwrt-aurora-chrome.css 更狠,用 h2:not(#mwrt-nope) 把优先级抬到 ID
+   级再 !important 写死 color。所以标题这条要用「类 + id」(1,1,1)才压得住,否则深
+   色下标题会是一行看不见的深字。 */
+.sms-head #sms-title {
+	margin: 0 !important;
+	padding: 0 !important;
+	font-size: 17px !important;
+	font-weight: 600;
+	letter-spacing: .01em;
+	color: var(--sms-txt) !important;
+	background: none !important;
+	border: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+	text-shadow: none;
+	text-align: left;
+}
+.sms-head p { margin: .2rem 0 0; color: var(--sms-dim); font-size: 12px; }
+
+.sms-gauge { min-width: 170px; }
+.sms-gauge[hidden] { display: none; }
+.sms-gauge-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 1rem;
+	font-size: 11.5px;
+	color: var(--sms-dim);
+	margin-bottom: .3rem;
+}
+.sms-gauge-row b { color: var(--sms-txt); font-weight: 600; }
+.sms-gauge-bar {
+	height: 4px;
+	border-radius: 99px;
+	background: var(--sms-line);
+	overflow: hidden;
+}
+.sms-gauge-fill {
+	display: block;
+	height: 100%;
+	width: 0;
+	border-radius: 99px;
+	background: var(--sms-accent);
+	transition: width .35s ease;
+}
+.sms-gauge-fill.is-full { background: var(--sms-danger); }
+
+/* ---- 工具条 ----------------------------------------------------------- */
+
+.sms-bar {
+	display: flex;
+	align-items: center;
+	gap: .45rem;
+	flex-wrap: wrap;
+	margin-bottom: .8rem;
+}
+.sms-bar .sms-search { flex: 1 1 180px; min-width: 150px; margin-left: auto; }
+
+.sms-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: .35rem;
+	padding: .42rem 1.05rem;
+	border: 1px solid var(--sms-line);
+	border-radius: 99px;
+	background: var(--sms-card);
+	color: var(--sms-txt);
+	font-size: 12.5px;
+	font-weight: 500;
+	line-height: 1.5;
+	cursor: pointer;
+	transition: background .16s ease, color .16s ease, opacity .16s ease;
+}
+.sms-btn:hover { background: var(--sms-hover); }
+.sms-btn[disabled] { opacity: .45; cursor: default; }
+.sms-btn-primary {
+	background: var(--sms-accent);
+	border-color: transparent;
+	color: var(--sms-on-accent);
+}
+.sms-btn-primary:hover { background: var(--sms-accent); opacity: .88; }
+.sms-btn-quiet { color: var(--sms-danger); }
+.sms-btn-quiet:hover { background: var(--sms-danger-soft); }
+
+.sms input[type=text], .sms textarea {
+	/* 主题给 input 定了固定宽度和白底,不 !important 的话号码框会缩成一小截。 */
+	width: 100% !important;
+	padding: .45rem .9rem !important;
+	border: 1px solid var(--sms-line) !important;
+	border-radius: 99px !important;
+	background-color: var(--sms-card) !important;
+	color: var(--sms-txt) !important;
+	font-size: 12.5px !important;
+	font-family: inherit;
+	transition: border-color .16s ease, box-shadow .16s ease;
+}
+.sms textarea {
+	min-height: 7em;
+	padding: .6rem .9rem !important;
+	border-radius: 14px !important;
+	resize: vertical;
+	line-height: 1.65;
+}
+.sms input[type=text]:focus, .sms textarea:focus {
+	outline: none !important;
+	border-color: var(--sms-accent) !important;
+	box-shadow: 0 0 0 3px var(--sms-accent-soft) !important;
+}
+.sms ::placeholder { color: var(--sms-dim); opacity: .75; }
+
+/* ---- 列表 ------------------------------------------------------------- */
+
+/* 一整块面板 + 细分隔线,比一堆带投影的小卡片平,也更像成品后台。 */
+.sms-panel {
+	background: var(--sms-card);
+	border: 1px solid var(--sms-line);
+	border-radius: 16px;
+	overflow: hidden;
+}
+
+.sms-row {
+	display: flex;
+	gap: .7rem;
+	padding: .8rem 1rem;
+	border-top: 1px solid var(--sms-line);
+	transition: background .16s ease;
+}
+.sms-row:first-child { border-top: 0; }
+.sms-row:hover { background: var(--sms-hover); }
+
+.sms-avatar {
+	flex: 0 0 auto;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	font-weight: 600;
+	color: #fff;
+	letter-spacing: .02em;
+}
+
+.sms-body { flex: 1 1 auto; min-width: 0; }
+.sms-meta {
+	display: flex;
+	align-items: baseline;
+	gap: .45rem;
+	flex-wrap: wrap;
+	margin-bottom: .1rem;
+}
+.sms-from { font-weight: 600; font-size: 12.5px; word-break: break-all; }
+.sms-row.is-unread .sms-from::before {
+	content: "";
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-right: .35rem;
+	border-radius: 50%;
+	background: var(--sms-accent);
+	vertical-align: middle;
+}
+.sms-time { color: var(--sms-dim); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+.sms-tag {
+	display: inline-block;
+	padding: 0 .45em;
+	border-radius: 99px;
+	font-size: 10.5px;
+	font-weight: 600;
+	line-height: 1.7;
+	background: var(--sms-accent-soft);
+	color: var(--sms-accent);
+}
+.sms-text {
+	font-size: 12.5px;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+.sms-text.is-clamped {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.sms-text a { color: var(--sms-accent); }
+.sms-more {
+	margin-top: .1rem;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--sms-accent);
+	font-size: 11.5px;
+	cursor: pointer;
+}
+
+.sms-item-act { flex: 0 0 auto; }
+.sms-icon {
+	width: 26px;
+	height: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	color: var(--sms-dim);
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	opacity: .55;
+	transition: background .16s ease, color .16s ease, opacity .16s ease;
+}
+.sms-row:hover .sms-icon { opacity: 1; }
+.sms-icon:hover { background: var(--sms-danger-soft); color: var(--sms-danger); }
+
+/* ---- 空态 / 载入 ------------------------------------------------------ */
+
+.sms-empty {
+	padding: 3rem 1rem;
+	text-align: center;
+	color: var(--sms-dim);
+	font-size: 12.5px;
+}
+.sms-empty-icon { font-size: 26px; opacity: .4; display: block; margin-bottom: .4rem; }
+
+.sms-skel { height: 58px; border-top: 1px solid var(--sms-line); position: relative; overflow: hidden; }
+.sms-skel:first-child { border-top: 0; }
+.sms-skel::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(90deg, transparent, var(--sms-hover), transparent);
+	animation: sms-shimmer 1.2s infinite;
+}
+@keyframes sms-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* ---- 写短信浮窗 ------------------------------------------------------- */
+
+/* z-index:1080 —— 本机最高的常驻层是 aurora 的「关于本机」按钮 1041/1042、
+   底部导航 1040(见 mwrt-aurora-chrome.css),要盖在它们上面。 */
+.sms-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 1080;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	padding: 1.2rem;
+}
+.sms-modal.is-open { display: flex; }
+.sms-mask {
+	position: absolute;
+	inset: 0;
+	background: var(--sms-mask);
+	-webkit-backdrop-filter: blur(10px) saturate(130%);
+	backdrop-filter: blur(10px) saturate(130%);
+	animation: sms-fade .18s ease both;
+}
+@keyframes sms-fade { from { opacity: 0; } }
+
+.sms-dialog {
+	position: relative;
+	width: min(440px, 100%);
+	max-height: calc(100dvh - 2.4rem);
+	display: flex;
+	flex-direction: column;
+	background: var(--sms-card);
+	border: 1px solid var(--sms-line);
+	border-radius: 20px;
+	box-shadow: 0 30px 70px -28px rgba(8, 15, 26, .5);
+	overflow: hidden;
+	animation: sms-pop .2s cubic-bezier(.2, .8, .3, 1) both;
+}
+@keyframes sms-pop { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+
+.sms-dialog-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: .9rem 1.1rem;
+	font-size: 13.5px;
+	font-weight: 600;
+	border-bottom: 1px solid var(--sms-line);
+}
+.sms-x {
+	width: 26px;
+	height: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: 50%;
+	background: none;
+	color: var(--sms-dim);
+	font-size: 13px;
+	cursor: pointer;
+	transition: background .16s ease, color .16s ease;
+}
+.sms-x:hover { background: var(--sms-hover); color: var(--sms-txt); }
+
+.sms-dialog-body { padding: 1rem 1.1rem .3rem; overflow: auto; }
+.sms-label {
+	display: block;
+	margin: 0 0 .3rem .15rem;
+	color: var(--sms-dim);
+	font-size: 11.5px;
+}
+.sms-dialog-body .sms-field + .sms-field { margin-top: .8rem; }
+
+.sms-note { min-height: 1.4em; margin-top: .55rem; font-size: 11.5px; color: var(--sms-dim); }
+.sms-note.is-good { color: var(--sms-accent); }
+.sms-note.is-bad { color: var(--sms-danger); }
+
+.sms-dialog-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: .6rem;
+	padding: .8rem 1.1rem 1rem;
+}
+.sms-count { color: var(--sms-dim); font-size: 11.5px; }
+.sms-foot-act { display: flex; gap: .45rem; }
+
+/* ---- 提示条 ----------------------------------------------------------- */
+
+.sms-toast {
+	position: fixed;
+	left: 50%;
+	bottom: 2rem;
+	transform: translate(-50%, 1rem);
+	z-index: 1090;
+	max-width: 90vw;
+	padding: .55rem 1.1rem;
+	border-radius: 99px;
+	background: #1c2430;
+	color: #fff;
+	font-size: 12.5px;
+	box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .2s ease, transform .2s ease;
+}
+.sms-toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+/* 提示条被搬到 body 底下,读不到 .sms 上的变量,颜色这里写死。 */
+.sms-toast.is-bad { background: #e35d6a; }
+
+@media (max-width: 600px) {
+	.sms-head { align-items: flex-start; }
+	.sms-gauge { width: 100%; }
+	.sms-bar .sms-search { margin-left: 0; order: -1; flex-basis: 100%; }
+	.sms-time { margin-left: 0; flex-basis: 100%; }
+}
+</style>
+
+<div class="sms">
+	<div class="sms-head">
+		<div>
+			<h2 id="sms-title">短信管理</h2>
+			<p>短信收取需要打开「模组设定 → 常规设置 → 短信开关」。</p>
+		</div>
+		<div class="sms-gauge" id="sms-gauge" hidden>
+			<div class="sms-gauge-row">
+				<span>SIM 卡存储</span>
+				<span><b id="sms-used">0</b> / <span id="sms-total">0</span> 格</span>
+			</div>
+			<div class="sms-gauge-bar"><i class="sms-gauge-fill" id="sms-fill"></i></div>
+		</div>
+	</div>
+
+	<div class="sms-bar">
+		<button class="sms-btn sms-btn-primary" id="sms-compose">写短信</button>
+		<button class="sms-btn" id="sms-refresh">刷新</button>
+		<button class="sms-btn sms-btn-quiet" id="sms-clear">清空</button>
+		<input type="text" class="sms-search" id="sms-search" placeholder="搜索发件人或内容">
+	</div>
+
+	<div class="sms-panel"><div class="sms-list" id="sms-list"></div></div>
+
+	<!-- class 里带一份 sms:脚本会把它搬到 <body> 下(见下面的 portal),搬走之后
+	     就不在 .sms 里了,变量得自己带着。 -->
+	<div class="sms sms-modal" id="sms-modal">
+		<div class="sms-mask" data-close="1"></div>
+		<div class="sms-dialog" role="dialog" aria-modal="true" aria-labelledby="sms-dialog-title">
+			<div class="sms-dialog-head">
+				<span id="sms-dialog-title">写短信</span>
+				<button class="sms-x" data-close="1" aria-label="关闭">✕</button>
+			</div>
+			<div class="sms-dialog-body">
+				<div class="sms-field">
+					<label class="sms-label" for="sms-number">收件号码</label>
+					<input type="text" id="sms-number" maxlength="32"
+					       placeholder="13800138000 / +8613800138000 / 10086">
+				</div>
+				<div class="sms-field">
+					<label class="sms-label" for="sms-text">短信内容</label>
+					<textarea id="sms-text" maxlength="2048"
+					          placeholder="超过 60 字会自动拆成长短信分段发送"></textarea>
+				</div>
+				<div class="sms-note" id="sms-note"></div>
+			</div>
+			<div class="sms-dialog-foot">
+				<span class="sms-count" id="sms-count">0 字</span>
+				<div class="sms-foot-act">
+					<button class="sms-btn" data-close="1">取消</button>
+					<button class="sms-btn sms-btn-primary" id="sms-send">发送</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="sms-toast" id="sms-toast"></div>
+</div>
+
+<script type="text/javascript">//<![CDATA[
+(function () {
+	var LIST_URL = '<%=luci.dispatcher.build_url("admin", "modem", "smslist")%>';
+	var DEL_URL  = '<%=luci.dispatcher.build_url("admin", "modem", "smsdel")%>';
+	var SEND_URL = '<%=luci.dispatcher.build_url("admin", "modem", "smssend")%>';
+
+	/* pdul.lua 每段装 60 个字符(UCS2,中英文一视同仁)。 */
+	var PER_SEGMENT = 60;
+
+	/* smssend 的错误是给命令行看的英文,这里翻成人话,认不出的原样显示。 */
+	var ERRORS = {
+		'invalid destination number': '号码格式不正确',
+		'empty message': '短信内容为空',
+		'PDU encoding failed': '短信编码失败',
+		'unsupported character (emoji)': '不支持表情符号等超出基本平面的字符',
+		'no +CMGS response': '模组没有回应，请稍后重试',
+		'sms_tool_q refused the message': '模组拒绝了这条短信'
+	};
+
+	var messages = [];
+	var expanded = {};
+	var filter = '';
+
+	var $ = function (id) { return document.getElementById(id); };
+	var root = document.querySelector('.sms');
+
+	/* 浮窗搬到 <body> 底下再用 position:fixed。主题的容器链上有 transform/filter
+	   之类的东西,谁带了这类属性谁就成了 fixed 的包含块 —— 留在原地的话遮罩只能盖住
+	   右侧内容区,侧边栏照样清清楚楚,模糊就漏了一块。 */
+	document.body.appendChild($('sms-modal'));
+	document.body.appendChild($('sms-toast'));   // 同理,提示条也要相对视口定位
+
+	function bright(rgb) {
+		return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000;
+	}
+
+	/* 把任意 CSS 颜色写法(#rgb、颜色名、rgb())统一解析成三个分量。 */
+	function rgbOf(value) {
+		var probe = document.createElement('span');
+		probe.style.cssText = 'display:none;color:' + value;
+		document.body.appendChild(probe);
+		var text = getComputedStyle(probe).color;
+		document.body.removeChild(probe);
+		var m = text.match(/(\d+),\s*(\d+),\s*(\d+)/);
+		return m ? [+m[1], +m[2], +m[3]] : null;
+	}
+
+	/* 深浅色不问 prefers-color-scheme:本机的浅色皮把主题按死在浅色上,跟着系统
+	   走就会出现浅色页面里一堆深色卡片。往上找第一个不透明的背景色,按它的明暗定。 */
+	function backdrop() {
+		for (var node = root.parentElement; node; node = node.parentElement) {
+			var m = getComputedStyle(node).backgroundColor
+				.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/);
+			if (m && (m[4] === undefined || +m[4] > 0.1))
+				return [+m[1], +m[2], +m[3]];
+		}
+		return [255, 255, 255];
+	}
+
+	function theme() {
+		/* 浮窗已经搬出去了,两处都要上色。 */
+		var skins = [root, $('sms-modal')];
+		if (bright(backdrop()) < 128)
+			skins.forEach(function (node) { node.classList.add('is-dark'); });
+
+		/* 强调色跟主题的 --primary 走,用户在「界面修改」里换色这页同步跟着换。 */
+		var primary = (getComputedStyle(document.documentElement)
+			.getPropertyValue('--primary') || '').trim();
+		var accent = primary ? rgbOf(primary) : null;
+		if (!accent) return;
+		skins.forEach(function (node) {
+			node.style.setProperty('--sms-accent', 'rgb(' + accent.join(',') + ')');
+			node.style.setProperty('--sms-accent-soft', 'rgba(' + accent.join(',') + ',.1)');
+			node.style.setProperty('--sms-on-accent', bright(accent) > 150 ? '#0b1f1a' : '#fff');
+		});
+	}
+
+	function esc(text) {
+		return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
+	function post(url, fields, done) {
+		var body = [];
+		fields.token = (window.L && L.env && L.env.token) || '';
+		for (var key in fields)
+			body.push(encodeURIComponent(key) + '=' + encodeURIComponent(fields[key]));
+
+		var xhr = new XMLHttpRequest();
+		xhr.open('POST', url, true);
+		xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+		xhr.onreadystatechange = function () {
+			if (xhr.readyState != 4) return;
+			var rv = null;
+			try { rv = JSON.parse(xhr.responseText); } catch (e) {}
+			done(rv, xhr.status);
+		};
+		xhr.send(body.join('&'));
+	}
+
+	var toastTimer = null;
+	function toast(text, bad) {
+		var box = $('sms-toast');
+		box.textContent = text;
+		box.className = 'sms-toast is-on' + (bad ? ' is-bad' : '');
+		clearTimeout(toastTimer);
+		toastTimer = setTimeout(function () { box.className = 'sms-toast'; }, 3200);
+	}
+
+	/* 同一个号码永远同一个颜色,扫列表的时候比头像上的字更好认。 */
+	var PALETTE = ['#388087', '#3c6e9f', '#7d5ba6', '#b5651d', '#2f8f5b', '#a34a5e', '#5b6b8c'];
+	function tint(sender) {
+		var hash = 0;
+		for (var i = 0; i < sender.length; i++)
+			hash = (hash * 31 + sender.charCodeAt(i)) & 0x7fffffff;
+		return PALETTE[hash % PALETTE.length];
+	}
+
+	/* 运营商短号(10086 之类)取前两位,手机号取末四位 —— 都是最好认的那几位。 */
+	function initials(sender) {
+		var digits = String(sender).replace(/^\+/, '');
+		if (/^\d+$/.test(digits))
+			return digits.length > 6 ? digits.slice(-4) : digits.slice(0, 2);
+		return digits.slice(0, 2).toUpperCase();
+	}
+
+	function when(text) {
+		var m = String(text || '').match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+		if (!m) return text || '';
+		var stamp = new Date(+m[1], +m[2] - 1, +m[3]);
+		var today = new Date();
+		today.setHours(0, 0, 0, 0);
+		var days = Math.round((today - stamp) / 86400000);
+		if (days === 0) return '今天 ' + m[4] + ':' + m[5];
+		if (days === 1) return '昨天 ' + m[4] + ':' + m[5];
+		if (days > 1 && days < 365 && stamp.getFullYear() === today.getFullYear())
+			return m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
+		return m[1] + '-' + m[2] + '-' + m[3];
+	}
+
+	function linkify(text) {
+		return esc(text).replace(/(https?:\/\/[^\s<]+)/g, function (url) {
+			return '<a href="' + url + '" target="_blank" rel="noreferrer noopener">' + url + '</a>';
+		});
+	}
+
+	function render() {
+		var list = $('sms-list');
+		var needle = filter.toLowerCase();
+		var shown = messages.filter(function (m) {
+			return !needle ||
+			       String(m.sender).toLowerCase().indexOf(needle) >= 0 ||
+			       String(m.text).toLowerCase().indexOf(needle) >= 0;
+		});
+
+		if (!shown.length) {
+			list.innerHTML = '<div class="sms-empty"><span class="sms-empty-icon">✉</span>' +
+				(messages.length ? '没有匹配的短信。' : '还没有短信。') + '</div>';
+			return;
+		}
+
+		list.innerHTML = shown.map(function (m) {
+			var key = m.indices.join(',');
+			var open = expanded[key];
+			var long = String(m.text).length > 110 || String(m.text).split('\n').length > 3;
+			return '' +
+				'<div class="sms-row' + (m.stat === 0 ? ' is-unread' : '') + '">' +
+					'<div class="sms-avatar" style="background:' + tint(m.sender) + '">' +
+						esc(initials(m.sender)) +
+					'</div>' +
+					'<div class="sms-body">' +
+						'<div class="sms-meta">' +
+							'<span class="sms-from">' + esc(m.sender) + '</span>' +
+							(m.stat === 0 ? '<span class="sms-tag">未读</span>' : '') +
+							(m.total > 1 ? '<span class="sms-tag">' + m.total + ' 段</span>' : '') +
+							'<span class="sms-time">' + esc(when(m.dt)) + '</span>' +
+						'</div>' +
+						'<div class="sms-text' + (long && !open ? ' is-clamped' : '') + '">' +
+							linkify(m.text) +
+						'</div>' +
+						(long ? '<button class="sms-more" data-more="' + esc(key) + '">' +
+							(open ? '收起' : '展开全文') + '</button>' : '') +
+					'</div>' +
+					'<div class="sms-item-act">' +
+						'<button class="sms-icon" data-del="' + esc(key) + '" title="删除">✕</button>' +
+					'</div>' +
+				'</div>';
+		}).join('');
+
+		list.querySelectorAll('[data-more]').forEach(function (button) {
+			button.onclick = function () {
+				var key = this.getAttribute('data-more');
+				expanded[key] = !expanded[key];
+				render();
+			};
+		});
+		list.querySelectorAll('[data-del]').forEach(function (button) {
+			button.onclick = function () { remove(this.getAttribute('data-del')); };
+		});
+	}
+
+	/* AT+CPMS? 偶尔会输掉串口的竞争,那一轮就读不到容量。这时候留着上一次的读数,
+	   不要让占用条忽隐忽现 —— 只有从头到尾没读到过才藏起来。 */
+	var lastGauge = null;
+	function gauge(used, total) {
+		if (typeof used != 'number' || typeof total != 'number' || !total) {
+			if (!lastGauge) { $('sms-gauge').hidden = true; return; }
+			used = lastGauge[0];
+			total = lastGauge[1];
+		} else {
+			lastGauge = [used, total];
+		}
+		$('sms-gauge').hidden = false;
+		$('sms-used').textContent = used;
+		$('sms-total').textContent = total;
+		var fill = $('sms-fill');
+		fill.style.width = Math.min(100, Math.round(used * 100 / total)) + '%';
+		fill.className = 'sms-gauge-fill' + (used >= total ? ' is-full' : '');
+	}
+
+	var loading = false;
+	function load(quiet) {
+		if (loading) return;
+		loading = true;
+		if (!quiet)
+			$('sms-list').innerHTML =
+				'<div class="sms-skel"></div><div class="sms-skel"></div><div class="sms-skel"></div>';
+
+		post(LIST_URL, {}, function (rv) {
+			loading = false;
+			if (!rv || !rv.ok) {
+				$('sms-list').innerHTML = '<div class="sms-empty"><span class="sms-empty-icon">⚠</span>' +
+					'读取失败，请确认模组的短信开关已打开后重试。</div>';
+				gauge();
+				return;
+			}
+			messages = rv.messages || [];
+			gauge(rv.used, rv.total);
+			render();
+		});
+	}
+
+	function remove(key) {
+		if (!confirm('删除这条短信？长短信的全部分段都会一起删除。')) return;
+		post(DEL_URL, { idx: key }, function (rv) {
+			if (rv && rv.ok) toast('已删除。');
+			else toast((rv && rv.error) || '删除失败。', true);
+			load(true);
+		});
+	}
+
+	function clearAll() {
+		if (!messages.length) { toast('没有可删除的短信。'); return; }
+		if (!confirm('删除 SIM 卡上的全部短信？此操作无法撤销。')) return;
+		post(DEL_URL, { idx: 'all' }, function (rv) {
+			if (rv && rv.ok) toast('已清空。');
+			else toast((rv && rv.error) || '删除失败。', true);
+			load(true);
+		});
+	}
+
+	function counter() {
+		var length = $('sms-text').value.length;
+		var segments = length <= PER_SEGMENT ? 1 : Math.ceil(length / PER_SEGMENT);
+		$('sms-count').textContent = length + ' 字' + (segments > 1 ? ' · ' + segments + ' 段' : '');
+	}
+
+	function openModal() {
+		$('sms-note').className = 'sms-note';
+		$('sms-note').textContent = '';
+		$('sms-modal').classList.add('is-open');
+		setTimeout(function () { $('sms-number').focus(); }, 30);
+	}
+
+	function closeModal() {
+		$('sms-modal').classList.remove('is-open');
+	}
+
+	function send() {
+		var number = $('sms-number').value.trim();
+		var text = $('sms-text').value;
+		var note = $('sms-note');
+		var button = $('sms-send');
+
+		if (!number || !text) {
+			note.className = 'sms-note is-bad';
+			note.textContent = '请填写号码和内容。';
+			return;
+		}
+
+		button.disabled = true;
+		note.className = 'sms-note';
+		note.textContent = '发送中…';
+
+		post(SEND_URL, { number: number, text: text }, function (rv, status) {
+			button.disabled = false;
+			if (rv && rv.ok) {
+				$('sms-text').value = '';
+				counter();
+				closeModal();
+				// 发出去的短信不写回 SIM,列表里不会多一条,所以只报结果不刷新。
+				toast('短信已发送' + (rv.segments > 1 ? '（' + rv.segments + ' 段长短信）' : '') + '。');
+			} else {
+				var reason = (rv && rv.error) || ('HTTP ' + status);
+				note.className = 'sms-note is-bad';
+				note.textContent = '发送失败：' + (ERRORS[reason] || reason);
+			}
+		});
+	}
+
+	$('sms-compose').onclick = openModal;
+	$('sms-refresh').onclick = function () { load(); };
+	$('sms-clear').onclick = clearAll;
+	$('sms-send').onclick = send;
+	$('sms-text').oninput = counter;
+	$('sms-search').oninput = function () { filter = this.value.trim(); render(); };
+
+	$('sms-modal').addEventListener('click', function (event) {
+		if (event.target.getAttribute('data-close')) closeModal();
+	});
+	document.addEventListener('keydown', function (event) {
+		if (!$('sms-modal').classList.contains('is-open')) return;
+		if (event.key === 'Escape') closeModal();
+		// 内容框里回车是换行,想发就按 Ctrl/⌘+Enter。
+		else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) send();
+	});
+
+	theme();
+	load();
+})();
+//]]></script>
+
+<%+footer%>

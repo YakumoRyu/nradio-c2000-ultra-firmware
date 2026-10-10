@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$INTERFACE:$ACTION" in
+  2_1v6:ifup|2_1v6:ifupdate|2_1v6:ifdown|lan:ifup|pcdn1:ifup)
+    (sleep 5; /usr/libexec/pcdn-ipv6-access) >/dev/null 2>&1 &
+    ;;
+esac

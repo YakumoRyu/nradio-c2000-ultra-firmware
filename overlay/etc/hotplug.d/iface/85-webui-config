@@ -1,0 +1,5 @@
+#!/bin/sh
+# When the LAN interface comes up (including after an IP change), refresh the modem
+# WEBUI SPA config so its websocket host follows the new br-lan IP automatically.
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] && /usr/bin/gen_webui_config.sh
+exit 0

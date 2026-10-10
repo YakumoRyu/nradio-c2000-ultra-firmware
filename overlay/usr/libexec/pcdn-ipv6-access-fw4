@@ -1,0 +1,3 @@
+#!/bin/sh
+# firewall4 invokes include scripts with /bin/sh, so preserve Python dispatch.
+exec /usr/bin/python3 /usr/libexec/pcdn-ipv6-access

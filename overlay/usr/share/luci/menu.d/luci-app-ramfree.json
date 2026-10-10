@@ -1,0 +1,15 @@
+{
+  "admin/status/release_ram": {
+    "title": "Release RAM",
+    "order": 999,
+    "action": {
+      "type": "view",
+      "path": "system/ramfree"
+    },
+    "depends": {
+      "acl": [
+        "luci-app-ramfree"
+      ]
+    }
+  }
+}

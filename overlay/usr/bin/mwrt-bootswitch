@@ -1,0 +1,188 @@
+#!/bin/sh
+#
+# mwrt-bootswitch —— 在 SD 卡系统和官方内置系统之间切换启动目标
+#
+# 原理:U-Boot 开机时读 SPI NOR 上 u-boot-env 分区里的 boot_from_sd 标识,
+#       1 = 优先从 SD 卡启动(当前 Mwrt 系统)
+#       0 = 从内置 flash 启动(官方系统)
+#       改完重启即生效。SD 卡不用拔,标识改回 1 就又回来了。
+#
+# 这个标识只能存在 NOR 上 —— U-Boot 得在"去 SD 还是去 NAND"这个决定之前
+# 就读到它,存在 SD 上没有意义。
+#
+# 安全原则:先确认能读到一份 CRC 正确的 env,才允许写。
+# env 分区里同时住着 boot_system/mtdparts 等一堆引导参数,写坏了机器起不来,
+# 所以宁可什么都不做也不能盲写。
+#
+# 用法:
+#   mwrt-bootswitch status        打印当前状态(JSON)
+#   mwrt-bootswitch to-official   切到官方系统(boot_from_sd=0)
+#   mwrt-bootswitch to-sd         切回 SD 卡系统(boot_from_sd=1)
+#   mwrt-bootswitch check         只做环境自检,不改任何东西
+
+set -u
+
+ENVCFG=/etc/fw_env.config
+PARTNAME=u-boot-env
+VAR=boot_from_sd
+
+# ---- 找到 u-boot-env 对应的 mtd 设备 ----------------------------------------
+find_env_mtd() {
+	# /proc/mtd 里形如:  mtd2: 00010000 00010000 "u-boot-env"
+	awk -F'[:"]' -v n="$PARTNAME" '$3 == n { print $1; exit }' /proc/mtd 2>/dev/null
+}
+
+# ---- 自检 ------------------------------------------------------------------
+# 任何一步不过就返回非 0,调用方据此拒绝写入。
+selfcheck() {
+	CHECK_ERR=""
+
+	# 注意:/proc/mtd 是 procfs 虚拟文件,stat 报的大小恒为 0,
+	# 所以绝不能用 [ -s ] 判断它有没有内容 —— 只能数行。
+	# 第一行是表头 "dev: size erasesize name",所以 <=1 行才算没有设备。
+	if [ ! -r /proc/mtd ] || [ "$(wc -l < /proc/mtd 2>/dev/null || echo 0)" -le 1 ]; then
+		CHECK_ERR="内核没有导出任何 MTD 设备。SPI NOR 未在 DTS 中启用,当前固件无法读写 U-Boot 环境变量。"
+		return 1
+	fi
+
+	MTD="$(find_env_mtd)"
+	if [ -z "$MTD" ]; then
+		CHECK_ERR="/proc/mtd 里找不到名为 $PARTNAME 的分区。"
+		return 1
+	fi
+
+	if [ ! -c "/dev/$MTD" ]; then
+		CHECK_ERR="/dev/$MTD 不存在。"
+		return 1
+	fi
+
+	# 分区在 /proc/mtd 报的 size / erasesize
+	set -- $(awk -F'[ :]+' -v n="$PARTNAME" \
+		'index($0, "\"" n "\"") { print $2, $3; exit }' /proc/mtd)
+	PSZ="${1:-}"; ERSZ="${2:-}"
+	if [ -z "$PSZ" ] || [ -z "$ERSZ" ]; then
+		CHECK_ERR="无法从 /proc/mtd 读出 $PARTNAME 的大小。"
+		return 1
+	fi
+
+	# 用户自己写过 fw_env.config 就尊重它,只做校验,不覆盖
+	if [ -f "$ENVCFG" ]; then
+		if try_env; then return 0; fi
+		CHECK_ERR="$ENVCFG 已存在但读不出有效的 U-Boot env($TRY_ERR)。请核对其中的偏移/大小,或删掉让本脚本重新探测。已中止,未做任何写入。"
+		return 1
+	fi
+
+	# U-Boot 的 CONFIG_ENV_SIZE 不一定等于整个分区大小,写小了/大了都会 Bad CRC。
+	# 分区大小优先,再退几个常见值,谁能读出有效的 env 就用谁。
+	# 探测只读不写,试错没有风险。
+	for esz in "0x$PSZ" 0x10000 0x8000 0x4000 0x2000 0x1000; do
+		printf '/dev/%s 0x0 %s 0x%s\n' "$MTD" "$esz" "$ERSZ" > "$ENVCFG"
+		if try_env; then
+			ENVSIZE="$esz"
+			return 0
+		fi
+	done
+
+	# 一个都不成:别留下一份错的配置误导以后
+	rm -f "$ENVCFG"
+	CHECK_ERR="试过多种环境变量区大小($PSZ/64K/32K/16K/8K/4K)都读不出有效的 U-Boot env(最后一次: $TRY_ERR)。可能 SPI NOR 未正确识别,或 U-Boot 的 env 偏移与分区表不符。已中止,未做任何写入。"
+	return 1
+}
+
+# 按当前 $ENVCFG 读一次,能读出 CRC 正确、含已知变量的 env 才算成功。
+# 只读操作 —— CRC 不对时绝不能写,env 里还住着引导参数。
+try_env() {
+	TRY_ERR=""
+	if ! out="$(fw_printenv 2>&1)"; then
+		TRY_ERR="fw_printenv 失败: $(echo "$out" | head -2 | tr '\n' ' ')"
+		return 1
+	fi
+	case "$out" in
+		*"Bad CRC"*|*"bad CRC"*)
+			TRY_ERR="CRC 校验失败"
+			return 1 ;;
+	esac
+	# 一份正常的 env 总得有几条常见变量。
+	# 注意:本机 U-Boot 没有 bootcmd —— 它用 boot_system + boot_from_sd
+	# 自己那套引导流程,所以不能拿 bootcmd 当判据(踩过这个坑)。
+	if ! echo "$out" | grep -qE '^(boot_from_sd|boot_system|bootdelay|baudrate|bootcmd)='; then
+		TRY_ERR="读到的内容里没有任何已知的 U-Boot 变量"
+		return 1
+	fi
+	# CRC 对但只有零星几行,也不像一份完整的 env
+	if [ "$(echo "$out" | wc -l)" -lt 5 ]; then
+		TRY_ERR="只读到 $(echo "$out" | wc -l) 条变量,不像一份完整的 env"
+		return 1
+	fi
+	return 0
+}
+
+current_value() {
+	fw_printenv -n "$VAR" 2>/dev/null || echo ""
+}
+
+# ---- 写入 ------------------------------------------------------------------
+switch_to() {
+	want="$1"; label="$2"
+
+	if ! selfcheck; then
+		echo "错误: $CHECK_ERR" >&2
+		return 1
+	fi
+
+	cur="$(current_value)"
+	if [ "$cur" = "$want" ]; then
+		echo "boot_from_sd 已经是 $want($label),无需改动。"
+		return 0
+	fi
+
+	if ! fw_setenv "$VAR" "$want" 2>&1; then
+		echo "错误: fw_setenv 写入失败,启动标识未改变。" >&2
+		return 1
+	fi
+
+	# 回读确认。写了没生效比没写更危险 —— 用户会以为已经切了。
+	got="$(current_value)"
+	if [ "$got" != "$want" ]; then
+		echo "错误: 回读为 '$got',期望 '$want',写入未生效。" >&2
+		return 1
+	fi
+
+	echo "已设置 boot_from_sd=$want($label),重启后生效。"
+	return 0
+}
+
+# ---- 入口 ------------------------------------------------------------------
+case "${1:-status}" in
+	status)
+		if selfcheck; then
+			cur="$(current_value)"
+			case "$cur" in
+				1) sys="sd"       ;;
+				0) sys="official" ;;
+				*) sys="unknown"  ;;
+			esac
+			printf '{"ok":true,"ready":true,"value":"%s","system":"%s","mtd":"%s"}\n' \
+				"$cur" "$sys" "${MTD:-}"
+		else
+			# 转义双引号和反斜杠,免得撑坏 JSON
+			msg="$(printf '%s' "$CHECK_ERR" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+			printf '{"ok":true,"ready":false,"error":"%s"}\n' "$msg"
+		fi
+		;;
+	check)
+		if selfcheck; then
+			echo "自检通过。mtd=$MTD  当前 boot_from_sd=$(current_value)"
+			echo "(1=SD 卡系统  0=官方系统)"
+			echo "env 配置: $(cat "$ENVCFG" 2>/dev/null)"
+		else
+			echo "自检未通过: $CHECK_ERR" >&2
+			exit 1
+		fi
+		;;
+	to-official) switch_to 0 "官方系统"  || exit 1 ;;
+	to-sd)       switch_to 1 "SD 卡系统" || exit 1 ;;
+	*)
+		echo "用法: $0 {status|check|to-official|to-sd}" >&2
+		exit 1 ;;
+esac

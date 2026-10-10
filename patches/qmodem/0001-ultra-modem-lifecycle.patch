@@ -1,0 +1,109 @@
+diff --git a/application/qmodem/files/etc/init.d/qmodem_network b/application/qmodem/files/etc/init.d/qmodem_network
+index 31184e5..0860e65 100755
+--- a/application/qmodem/files/etc/init.d/qmodem_network
++++ b/application/qmodem/files/etc/init.d/qmodem_network
+@@ -21,8 +21,22 @@ service_triggers()
+ 
+ start_service(){
+     force_stop=0
+-    mkdir -p $MODEM_RUNDIR
+-    update_modem
++    mkdir -p "$MODEM_RUNDIR"
++    # rc.common already opened a procd service JSON transaction. Declare all
++    # desired instances here; nesting rc_procd would destroy that transaction.
++    config_load qmodem
++    config_get g_enabled main enable_dial
++    config_foreach _register_enabled_modem modem-device
++}
++
++_register_enabled_modem(){
++    local enabled state
++    config_get enabled "$1" enable_dial
++    config_get state "$1" state
++    [ "$g_enabled" = "0" ] && return 0
++    [ "$enabled" = "0" ] && return 0
++    [ "$state" = "disabled" ] && return 0
++    _dial "$1"
+ }
+ 
+ stop_service(){
+diff --git a/application/qmodem/files/usr/share/qmodem/modem_dial.sh b/application/qmodem/files/usr/share/qmodem/modem_dial.sh
+index 8e6a35f..b621722 100755
+--- a/application/qmodem/files/usr/share/qmodem/modem_dial.sh
++++ b/application/qmodem/files/usr/share/qmodem/modem_dial.sh
+@@ -993,7 +993,7 @@ flush_if()
+         /etc/init.d/firewall restart
+     fi
+     if [ "$network_reload_needed" -eq 1 ]; then
+-        /etc/init.d/network restart
++        /etc/init.d/network reload
+     fi
+ }
+ 
+@@ -1085,7 +1085,10 @@ ecm_hang()
+             at_command='AT$QCRMCALL=0,0,3,2,'$pdp_index
+             ;;
+         "huawei")
+-            at_command="AT^NDISDUP=0,0"
++            case "$platform" in
++                "hisilicon") at_command="AT^NDISDUP=$pdp_index,0" ;;
++                *) at_command="AT^NDISDUP=0,0" ;;
++            esac
+             ;;
+         "neoway")
+             delay=3
+@@ -1320,7 +1323,7 @@ at_dial()
+         "huawei")
+             case $platform in
+                 "hisilicon")
+-                    at_command="AT^NDISDUP=1,$pdp_index"
++                    at_command="AT^NDISDUP=$pdp_index,1"
+                     cgdcont_command="AT+CGDCONT=$pdp_index,\"$pdp_type\""$apn_append
+                     if [ -n "$auth" ]; then
+                         case $auth in
+diff --git a/application/qmodem/files/usr/share/qmodem/modem_util.sh b/application/qmodem/files/usr/share/qmodem/modem_util.sh
+index e039601..4726a17 100755
+--- a/application/qmodem/files/usr/share/qmodem/modem_util.sh
++++ b/application/qmodem/files/usr/share/qmodem/modem_util.sh
+@@ -90,6 +90,15 @@ qmodem_record_testcase_file()
+     > "$file" 2>/dev/null || rm -f "$file"
+ }
+ 
++qmodem_at_dispatch()
++{
++  if [ "${use_ubus_flag:-}" = "-u" ]; then
++    /usr/libexec/qmodem-at-ubus "$1" "$2"
++  else
++    tom_modem -d "$1" -o a -c "$2" $options
++  fi
++}
++
+ at()
+ {
+   local at_port=$1
+@@ -103,14 +112,14 @@ at()
+       if [ "$(uci get qmodem.main.at_tool 2>/dev/null)" == "1" ]; then
+         sms_tool_q -d $at_port at "$atcmd"
+       else
+-        tom_modem $use_ubus_flag -d $at_port -o a -c "$atcmd" $options
++        qmodem_at_dispatch "$at_port" "$atcmd"
+       fi
+       return $?
+     }
+     if [ "$(uci get qmodem.main.at_tool 2>/dev/null)" == "1" ]; then
+      sms_tool_q -d $at_port at "$atcmd" > "$response_file"
+     else
+-     tom_modem $use_ubus_flag -d $at_port -o a -c "$atcmd" $options > "$response_file"
++     qmodem_at_dispatch "$at_port" "$atcmd" > "$response_file"
+     fi
+     rc=$?
+     qmodem_record_testcase_file "at" "$atcmd" "$response_file" "$rc"
+@@ -121,7 +130,7 @@ at()
+   if [ "$(uci get qmodem.main.at_tool 2>/dev/null)" == "1" ]; then
+    sms_tool_q -d $at_port at "$atcmd"
+   else
+-   tom_modem $use_ubus_flag  -d $at_port -o a -c "$atcmd" $options
++   qmodem_at_dispatch "$at_port" "$atcmd"
+   fi
+ }
+ 

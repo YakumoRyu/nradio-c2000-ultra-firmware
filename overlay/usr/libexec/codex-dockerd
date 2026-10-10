@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enable v2 controllers on the procd service ancestors before Docker detects limits.
+set -eu
+root=/sys/fs/cgroup
+[ -f "$root/cgroup.controllers" ] || exit 1
+relative=$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)
+[ -n "$relative" ] && [ "$relative" != / ] || exit 1
+[ -f "$root$relative/memory.swap.max" ] || exit 1
+exec /usr/lib/codex-docker/bin/dockerd --config-file=/etc/codex-docker/daemon.json

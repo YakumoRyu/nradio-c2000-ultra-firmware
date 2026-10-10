@@ -1,0 +1,49 @@
+{
+  "base": {
+    "url": "https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git",
+    "commit": "1b6fa75ca02aa7a7dd6d0b6c68865f16eef5ae0f"
+  },
+  "feeds": {
+    "packages": {
+      "url": "https://github.com/immortalwrt/packages.git",
+      "commit": "84bd86384928955b568988ca0e09e2c78c75173d"
+    },
+    "luci": {
+      "url": "https://github.com/immortalwrt/luci.git",
+      "commit": "d6167ea0645cbd1327708d85f94824f42d0eb872"
+    },
+    "routing": {
+      "url": "https://github.com/openwrt/routing.git",
+      "commit": "b32747dca62435f1ea01b7a5320c3da15eead46f"
+    },
+    "telephony": {
+      "url": "https://github.com/openwrt/telephony.git",
+      "commit": "2618106d5846a4a542fdf5809f0d3ed228ce439b"
+    },
+    "video": {
+      "url": "https://github.com/openwrt/video.git",
+      "commit": "094bf58da6682f895255a35a84349a79dab4bf95"
+    }
+  },
+  "external": {
+    "qmodem": {
+      "url": "https://github.com/FUjr/QModem.git",
+      "commit": "0988085b887346ae9477ef2e77abe2f797bd2c4a"
+    },
+    "istore": {
+      "url": "https://github.com/linkease/istore.git",
+      "commit": "a97ace34f2da358a015b094d326bba2697697f2e"
+    },
+    "v2dat": {
+      "url": "https://github.com/urlesistiana/v2dat.git",
+      "commit": "47b8ee51fb528e11e1a83453b7e767a18d20d1f7"
+    }
+  },
+  "webui": {
+    "url": "https://github.com/inotdream/mt5700webui-openwrt-server.git",
+    "tag": "v3.0.2",
+    "commit": "4bf3ae253d7ba98cb5a4c5f2a545b40610a4fbcd"
+  },
+  "release": "ultra-25.12-20261009-r2",
+  "source_date_epoch": 1787997242
+}
