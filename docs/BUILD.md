@@ -28,10 +28,13 @@ node tests/test-v302-frontend.cjs
 
 1. 检出 `sources.lock.json` 中的基线提交，应用 `patches/base`。
 2. 将 `source-additions` 合并到基线，将 `packages/at-webserver`、`packages/luci-app-at-webserver` 放到基线的 `package/custom`。
-3. 按锁定提交准备 feeds、QModem、iStore、v2dat；应用 QModem 补丁，添加 `packages/compat` feed。
-4. 将 `overlay` 放入基线 `files`，使用 `configs/ultra.config`，运行 `make defconfig`。
-5. 补齐 `binary-assets.lock.json` 记录的输入后再构建。未补齐时不能把生成镜像称为完整复现版。
+3. 按锁定提交准备feeds、QModem、iStore、v2dat；依次应用`patches/qmodem/0001`和`0002`，添加`packages/compat` feed。
+4. 将`packages/ultra-qmodem-hotfix`放到基线的`package/custom`，与WebUI包一同编译。单独升级包可用`make package/custom/ultra-qmodem-hotfix/compile`构建。
+5. 将 `overlay` 放入基线 `files`，使用 `configs/ultra.config`，运行 `make defconfig`。
+6. 补齐 `binary-assets.lock.json` 记录的输入后再构建。未补齐时不能把生成镜像称为完整复现版。
 
 本仓库没有把 Docker、Mihomo、Cloudflared、规则库等大型二进制加入 Git。部分历史管理资源的来源与构建链仍需继续整理；当前完整发布镜像来自已验证的本地工程。GitHub Actions 目前执行源码/协议回归，不声称自动生成已通过实机验收的完整固件。
 
 整固件打包后必须检查板型、FIT/DTB、内核模块 ABI、512 MiB 数据区布局、原登录模板、闭源驱动补丁、隐私和用户态执行，再完成真实设备验收。
+
+拨号计数和升级包回归可独立运行`python3 tests/test-qmodem-hotfix.py`；测试使用模拟硬件操作和临时文件系统，不访问生产模块。

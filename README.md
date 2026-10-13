@@ -8,7 +8,8 @@
 | 内核 | Linux 6.12.103 |
 | 无线 | 联发科闭源驱动 8.3.1.2 |
 | WebUI | 上游 v3.0.2，QModem 适配包 3.0.2-r2 |
-| 固件版本 | ultra-25.12-20261009-r2 |
+| 固件版本 | ultra-25.12-20261013-r3 |
+| 独立升级包 | ultra-qmodem-hotfix 20261013-r1 |
 | 升级格式 | sysupgrade，布局兼容号 2.0，根分区内预留 512 MiB |
 
 本项目是社区自编适配版。只适用于上述 Ultra 板型，不能仅凭名称相近用于 C2000 Max。
@@ -17,12 +18,20 @@
 
 固件与配套离线软件仓库放在 [Releases](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases)，源码、补丁和版本记录由 Git 管理。
 
+本次更新分开发布，按需要选择：
+
+| 下载 | 用途 |
+| --- | --- |
+| [独立升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-qmodem-hotfix-20261013-1) | 约3.8KB的IPK，修复现有Ultra 25.12系统的AT异常累计重拨，保留配置，无需刷整固件。 |
+| [完整r3固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261013-r3) | 包含内核及完整根文件系统的sysupgrade，补丁进入ROM；适用于兼容的Ultra TF系统升级。 |
+
 当前主固件约 **205.93 MiB**，可选软件仓库约 **144.03 MiB**。保留 Docker、Mihomo、Cloudflared、Python 和原有管理组件，因此体积与精简版不同。
 
-**r2 已完成编译与静态/用户态验收，整镜像尚未刷写或实机启动。** 其中 WebUI 3.0.2 适配包已在运行中的 Ultra 路由器安装，并完成页面、AT 查询和共享短信库验收。发布为预发布版本，不能把单独 WebUI 的验收等同于整固件验收。
+**r3已完成编译、镜像/隐私审计和用户态验收，整镜像尚未刷写或实机启动。** 本次独立升级包已在运行中的Ultra安装：只重新加载拨号监测实例，配置及短信状态保持，跨安装窗口PCDN持续上传。完整固件仍发布为预发布版；补丁的在线验收不能等同于整固件启动验收。WebUI保持已验收的3.0.2-r2。
 
 - [安装与兼容说明](docs/INSTALL.md)
-- [版本验证记录](releases/ultra-25.12-20261009-r2/VERIFICATION.json)
+- [版本验证记录](releases/ultra-25.12-20261013-r3/VERIFICATION.json)
+- [升级包安装与回退](releases/ultra-qmodem-hotfix-20261013-1/README.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建说明](docs/BUILD.md)
 - [维护流程](docs/MAINTENANCE.md)
@@ -32,6 +41,7 @@
 - Wi-Fi NAPI 无进展空转、QoS 事件边界及逐设备接收错误计数修复。
 - Ultra 板型、TF 启动与升级布局适配，保留原登录页面。
 - QModem 统一负责模块发现、拨号和 AT 串口，WebUI 经 ubus 调用，避免多个服务争抢串口。
+- QModem有效PDP应答清零异常计数，避免分散的AT异常累计触发重拨；连续4次异常仍保留恢复拨号。
 - Web 短信管理和转发共用持久数据库；查看不修改已读位、不领取转发任务，删除使用独立数据库编号。
 - PushPlus 通用转发脚本和自定义转发入口，出厂不包含 Token 或个人转发目标。
 - UPnP/IPv6 辅助逻辑、设备速率统计、代理恢复及媒体资源保护。

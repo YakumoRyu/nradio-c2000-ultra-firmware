@@ -1742,6 +1742,7 @@ at_dial_monitor()
                 sleep 5
                 ;;
             *)
+                unexpected_response_count=0
                 if [ "$ipv4" != "$ipv4_cache" ] || [ "$ipv6" != "$ipv6_cache" ]; then
                     handle_ip_change
                     ipv4_cache=$ipv4

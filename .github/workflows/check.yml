@@ -6,6 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
+  qmodem-hotfix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/test-qmodem-hotfix.py
+      - run: sh -n overlay/usr/share/qmodem/modem_dial.sh
   webui:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

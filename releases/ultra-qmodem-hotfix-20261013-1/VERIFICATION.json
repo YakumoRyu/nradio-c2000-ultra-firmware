@@ -1,0 +1,42 @@
+{
+  "release": "ultra-qmodem-hotfix-20261013-1",
+  "type": "configuration-preserving IPK upgrade package",
+  "package": "ultra-qmodem-hotfix",
+  "version": "20261013-r1",
+  "filename": "ultra-qmodem-hotfix_20261013-r1_aarch64_cortex-a53.ipk",
+  "bytes": 3854,
+  "supported_board": "NRadio-C2000MAX-Ultra",
+  "supported_system": "Ultra 25.12 TF baseline with the reviewed QModem source",
+  "regression_test_count": 8,
+  "regression_tests_passed": true,
+  "payload_matches_reviewed_source": true,
+  "installed_on_live_router": true,
+  "live_checks": {
+    "configuration_unchanged": true,
+    "sms_read_and_delivery_state_unchanged": true,
+    "boot_unchanged": true,
+    "AT_owner_not_restarted": true,
+    "PDP_netifd_interfaces_not_restarted": true,
+    "monitor_reloaded_with_fixed_source": true,
+    "original_source_backed_up": true,
+    "PCDN_continued_during_install": true,
+    "no_new_LAN_WAN_errors_or_drops": true,
+    "CPU_and_memory_headroom": true,
+    "real_AT_address_and_5G_queries_ok": true,
+    "guard_did_not_stop_media": true,
+    "PCDN_not_in_Mihomo": true,
+    "OpenClash_bypass_still_present": true
+  },
+  "router_rebooted": false,
+  "full_image_flashed": false,
+  "source_backup_verified": true,
+  "rollback_fixture_verified": true,
+  "persists_normal_reboot": true,
+  "factory_reset_persistence_requires_full_r3": true,
+  "personal_configuration_in_package": false,
+  "daily_revenue_improvement_proven": false,
+  "limitations": [
+    "No new SMS was generated during validation",
+    "Short natural-workload observation does not prove full-day revenue or capacity"
+  ]
+}

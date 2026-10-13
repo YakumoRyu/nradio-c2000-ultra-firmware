@@ -1,0 +1,32 @@
+{
+  "release": "ultra-25.12-20261013-r3",
+  "type": "complete sysupgrade firmware",
+  "model": "NRadio-C2000MAX-Ultra",
+  "system": "ImmortalWrt 25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "wifi": "MediaTek proprietary 8.3.1.2",
+  "webui": "3.0.2-r2",
+  "qmodem": "3.4.0_rc3-r1.ultra3",
+  "fix": "Reset AT error history after each valid PDP response",
+  "image_filename": "ultra-25.12-20261013-r3-nradio-c2000ultra-sysupgrade.bin",
+  "image_bytes": 215932127,
+  "optional_repository_filename": "ultra-25.12-20261013-r3-optional-packages.tar.gz",
+  "optional_repository_bytes": 150996828,
+  "image_checks": 88,
+  "userspace_checks": 19,
+  "privacy_files_scanned": 7000,
+  "private_value_hits": 0,
+  "compile_and_audit_passed": true,
+  "same_patch_live_verified": true,
+  "whole_image_flashed": false,
+  "whole_image_hardware_boot_verified": false,
+  "factory_reset_executed": false,
+  "personal_data_included": false,
+  "matching_optional_repository_verified": true,
+  "different_bytes_from_r2": true,
+  "limitations": [
+    "The complete image has not been flashed or hardware-booted",
+    "Live hotfix validation is not whole-image boot/factory-reset validation",
+    "Daily PCDN revenue improvement is unproven"
+  ]
+}

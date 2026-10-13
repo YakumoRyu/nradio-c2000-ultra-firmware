@@ -1,0 +1,21 @@
+--- a/application/qmodem/Makefile
++++ b/application/qmodem/Makefile
+@@ -5,7 +5,7 @@
+ include ../../version.mk
+ 
+ PKG_NAME:=qmodem
+-PKG_RELEASE:=$(QMODEM_RELEASE)
++PKG_RELEASE:=$(QMODEM_RELEASE).ultra3
+ PKG_VERSION:=$(QMODEM_VERSION)
+ 
+ include $(INCLUDE_DIR)/package.mk
+--- a/application/qmodem/files/usr/share/qmodem/modem_dial.sh
++++ b/application/qmodem/files/usr/share/qmodem/modem_dial.sh
+@@ -1742,6 +1742,7 @@
+                 sleep 5
+                 ;;
+             *)
++                unexpected_response_count=0
+                 if [ "$ipv4" != "$ipv4_cache" ] || [ "$ipv6" != "$ipv6_cache" ]; then
+                     handle_ip_change
+                     ipv4_cache=$ipv4

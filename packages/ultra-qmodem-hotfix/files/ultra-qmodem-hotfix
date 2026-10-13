@@ -1,0 +1,179 @@
+#!/usr/bin/python3
+"""Minimal, idempotent QModem source update; never invoke modem hang/redial."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import tempfile
+import time
+
+VERSION = '20261013-1'
+TARGET = 'usr/share/qmodem/modem_dial.sh'
+BACKUP = 'overlay/ultra-hotfix-backups/' + VERSION
+STAMP = 'etc/ultra-hotfixes/qmodem-consecutive-errors.json'
+OLD = b'            *)\n                if [ "$ipv4" != "$ipv4_cache" ] || [ "$ipv6" != "$ipv6_cache" ]; then'
+NEW = b'            *)\n                unexpected_response_count=0\n                if [ "$ipv4" != "$ipv4_cache" ] || [ "$ipv6" != "$ipv6_cache" ]; then'
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_write(path, data, mode=0o600, owner=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.ultra-hotfix-', dir=str(path.parent))
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), mode)
+            if owner is not None:
+                os.fchown(stream.fileno(), *owner)
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def rpc(method, payload):
+    raw = subprocess.check_output(['ubus', 'call', 'service', method, json.dumps(payload)], timeout=8)
+    return json.loads(raw or b'{}')
+
+
+def monitors():
+    service = rpc('list', {'name': 'qmodem_network'}).get('qmodem_network', {})
+    result = []
+    for name, instance in service.get('instances', {}).items():
+        command = instance.get('command', [])
+        pid = instance.get('pid')
+        if not instance.get('running') or not isinstance(pid, int):
+            continue
+        if not name.startswith('modem_') or '/usr/share/qmodem/modem_dial.sh' not in command or 'dial' not in command:
+            continue
+        argv = Path('/proc/' + str(pid) + '/cmdline').read_bytes().split(b'\0')
+        if b'/usr/share/qmodem/modem_dial.sh' not in argv or b'dial' not in argv:
+            raise RuntimeError('Procd monitor PID no longer matches its command')
+        result.append({'instance': name, 'old_pid': pid})
+    return result
+
+
+def activate(previous):
+    for item in previous:
+        rpc('signal', {'name': 'qmodem_network', 'instance': item['instance'], 'signal': 15})
+    pending = {item['instance']: item for item in previous}
+    deadline = time.monotonic() + 50
+    while pending and time.monotonic() < deadline:
+        time.sleep(1)
+        current = {item['instance']: item for item in monitors()}
+        for name in list(pending):
+            item = pending[name]
+            new = current.get(name)
+            if new and new['old_pid'] != item['old_pid']:
+                item['new_pid'] = new['old_pid']
+                del pending[name]
+    if pending:
+        raise RuntimeError('Patched monitor did not respawn within 50 seconds')
+    return previous
+
+
+def apply(root, target):
+    original = target.read_bytes()
+    if original.count(NEW) == 1 and original.count(OLD) == 0:
+        return {'changed': False, 'already_applied': True}
+    if original.count(OLD) != 1 or b'at_dial_monitor()\n{' not in original or b'unexpected_response_count=$((unexpected_response_count+1))' not in original:
+        raise RuntimeError('Unsupported monitor source; no files changed')
+    candidate = original.replace(OLD, NEW, 1)
+    syntax = subprocess.run(['/bin/sh', '-n'], input=candidate, capture_output=True)
+    if syntax.returncode:
+        raise RuntimeError('Candidate syntax check failed; no files changed')
+    backup_dir = root / BACKUP
+    backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = backup_dir / 'modem_dial.sh.before'
+    record = backup_dir / 'record.json'
+    if backup.exists():
+        if backup.read_bytes() != original:
+            raise RuntimeError('Existing backup differs; refusing to replace it')
+    else:
+        atomic_write(backup, original)
+    metadata = {'version': VERSION, 'before_sha256': digest(original), 'after_sha256': digest(candidate), 'target': TARGET}
+    atomic_write(record, json.dumps(metadata, sort_keys=True).encode() + b'\n')
+    info = target.stat()
+    atomic_write(target, candidate, stat.S_IMODE(info.st_mode), (info.st_uid, info.st_gid))
+    atomic_write(root / STAMP, json.dumps({'version': VERSION, 'fix': 'consecutive-at-errors'}).encode() + b'\n')
+    return {'changed': True, 'backup': '/' + BACKUP + '/modem_dial.sh.before'}
+
+
+def rollback(root, target):
+    directory = root / BACKUP
+    backup = directory / 'modem_dial.sh.before'
+    record = directory / 'record.json'
+    if not backup.is_file() or not record.is_file():
+        raise RuntimeError('No checked backup; ROM fixes cannot be removed by this helper')
+    metadata = json.loads(record.read_text())
+    original = backup.read_bytes()
+    current = target.read_bytes()
+    if digest(original) != metadata['before_sha256']:
+        raise RuntimeError('Backup verification failed')
+    if current == original:
+        return {'changed': False, 'already_rolled_back': True}
+    if digest(current) != metadata['after_sha256']:
+        raise RuntimeError('Monitor changed after this hotfix; refusing to overwrite it')
+    info = target.stat()
+    atomic_write(target, original, stat.S_IMODE(info.st_mode), (info.st_uid, info.st_gid))
+    stamp = root / STAMP
+    if stamp.exists():
+        stamp.unlink()
+    return {'changed': True, 'rolled_back': True}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=('apply', 'rollback', 'status'))
+    parser.add_argument('--activate', action='store_true', help='Reload only the procd dial-monitor instances after a changed file')
+    parser.add_argument('--root', default='/', help='Offline test/build root; activation is forbidden with a non-production root')
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    if args.activate and root != Path('/'):
+        raise RuntimeError('Offline root cannot activate production services')
+    if root == Path('/') and os.geteuid() != 0:
+        raise RuntimeError('Root privileges are required')
+    board = (root / 'tmp/sysinfo/board_name').read_text().strip()
+    release = (root / 'etc/openwrt_release').read_text()
+    if board != 'NRadio-C2000MAX-Ultra' or '25.12' not in release:
+        raise RuntimeError('This hotfix supports only the Ultra 25.12 baseline')
+    target = root / TARGET
+    if not target.is_file() or target.is_symlink() or not target.resolve().is_relative_to(root):
+        raise RuntimeError('Unexpected monitor target')
+    if args.action == 'status':
+        data = target.read_bytes()
+        print(json.dumps({'version': VERSION, 'applied': data.count(NEW) == 1, 'backup_available': (root / BACKUP / 'record.json').exists()}))
+        return
+    lock_path = root / 'var/run/ultra-qmodem-hotfix.lock'
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        previous = monitors() if args.activate else []
+        result = apply(root, target) if args.action == 'apply' else rollback(root, target)
+        if args.activate and result['changed']:
+            try:
+                result['monitor_instances'] = activate(previous)
+            except Exception:
+                if args.action == 'apply':
+                    rollback(root, target)
+                    activate(monitors())
+                raise
+        result.update({'version': VERSION, 'monitor_reloaded': bool(previous) and result['changed']})
+        print(json.dumps(result))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        raise SystemExit('Ultra hotfix: ' + str(error))
