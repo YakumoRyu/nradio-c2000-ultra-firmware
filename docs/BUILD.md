@@ -30,11 +30,13 @@ node tests/test-v302-frontend.cjs
 2. 将 `source-additions` 合并到基线，将 `packages/at-webserver`、`packages/luci-app-at-webserver` 放到基线的 `package/custom`。
 3. 按锁定提交准备feeds、QModem、iStore、v2dat；依次应用`patches/qmodem/0001`和`0002`，添加`packages/compat` feed。
 4. 将`packages/ultra-qmodem-hotfix`放到基线的`package/custom`，与WebUI包一同编译。单独升级包可用`make package/custom/ultra-qmodem-hotfix/compile`构建。
-5. 将 `overlay` 放入基线 `files`，使用 `configs/ultra.config`，运行 `make defconfig`。
-6. 补齐 `binary-assets.lock.json` 记录的输入后再构建。未补齐时不能把生成镜像称为完整复现版。
+5. 将`packages/ultra-port-manager`放入`package/custom`；将`overlay`放入`files`，使用`configs/ultra.config`，运行`make defconfig`。在打包根文件系统前，将`overlay/www/luci-static/resources/ultra-layout.css`追加到主题`www/luci-static/argon/css/cascade.css`，标记只保留一次。
+6. 准备`binary-assets.lock.json`记录的输入，完成依赖检查后构建完整镜像。
 
-本仓库没有把 Docker、Mihomo、Cloudflared、规则库等大型二进制加入 Git。部分历史管理资源的来源与构建链仍需继续整理；当前完整发布镜像来自已验证的本地工程。GitHub Actions 目前执行源码/协议回归，不声称自动生成已通过实机验收的完整固件。
+本仓库没有把 Docker、Mihomo、Cloudflared、规则库等大型二进制加入 Git。部分历史管理资源的来源与构建链仍需继续整理；当前完整发布镜像来自已验证的本地工程。GitHub Actions执行源码与协议回归，完整固件由本地工程构建并完成镜像审计。
 
-整固件打包后必须检查板型、FIT/DTB、内核模块 ABI、512 MiB 数据区布局、原登录模板、闭源驱动补丁、隐私和用户态执行，再完成真实设备验收。
+整固件打包后检查板型、FIT/DTB、内核模块 ABI、512 MiB 数据区布局、原登录模板、闭源驱动补丁、隐私和用户态执行，再完成真实设备验收。
 
 拨号计数和升级包回归可独立运行`python3 tests/test-qmodem-hotfix.py`；测试使用模拟硬件操作和临时文件系统，不访问生产模块。
+
+网口、AT字段和显示升级工具的回归分别为`tests/test-ultra-ports.py`、`tests/test-modem-fields.py`、`tests/test-modem-fields.lua`及`tests/test-ui-hotfix.py`。Lua用5.1运行；网口事务测试可通过`UCI_RUNNER`指定实际目标UCI的JSON参数列表，其余协议测试独立执行。

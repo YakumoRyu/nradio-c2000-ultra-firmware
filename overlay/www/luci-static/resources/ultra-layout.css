@@ -1,0 +1,22 @@
+/* ultra-layout:20261015-r1 */
+.sidenav-header .brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    font-size: 18px !important;
+    line-height: 1.45 !important;
+    letter-spacing: 0;
+    white-space: normal;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    text-wrap: balance;
+}
+@media (max-width: 920px) {
+    header .brand, .main-right .brand {
+        font-size: 17px !important;
+        white-space: nowrap;
+        word-break: keep-all !important;
+    }
+}

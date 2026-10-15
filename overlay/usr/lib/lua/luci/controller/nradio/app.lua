@@ -463,15 +463,16 @@ end
 
 local function map_info(t)
 	local m = {}
+	local fields = require "luci.model.ultra_modem_fields"
 	for _, item in ipairs((t or {}).modem_info or {}) do
 		local k = trim(item.key or item.name or item.title)
-		if k ~= "" then
+		if k ~= "" and fields.value(k, item.value or item.val or item.result) ~= nil then
 			m[k] = item.value or item.val or item.result or ""
 			m[k:lower()] = m[k]
 		end
 	end
 	for k, v in pairs(t or {}) do
-		if type(v) ~= "table" then
+		if type(v) ~= "table" and fields.value(k, v) ~= nil then
 			m[k] = v
 			m[tostring(k):lower()] = v
 		end

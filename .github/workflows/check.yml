@@ -6,6 +6,17 @@ on:
 permissions:
   contents: read
 jobs:
+  ultra-ports-and-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y lua5.1
+      - run: python3 tests/test-ultra-ports.py
+      - run: python3 tests/test-modem-fields.py
+      - run: python3 tests/test-ui-hotfix.py
+      - run: lua5.1 tests/test-modem-fields.lua
+      - run: sh -n overlay/usr/libexec/qmodem-at-ubus
   qmodem-hotfix:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

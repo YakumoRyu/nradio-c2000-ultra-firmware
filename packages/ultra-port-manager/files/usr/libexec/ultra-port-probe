@@ -1,0 +1,139 @@
+#!/usr/bin/python3
+"""Bounded DHCP/PPPoE discovery on Ultra eth0; never request an address/session."""
+import ctypes
+import fcntl
+import json
+import os
+from pathlib import Path
+import select
+import socket
+import struct
+import sys
+import time
+
+PORT = 'eth0'
+ROOT = Path('/tmp/ultra-ports')
+FILTER = [(0x28,0,0,12),(0x15,8,0,0x8863),(0x15,0,8,0x0800),
+          (0x30,0,0,23),(0x15,0,6,17),(0x28,0,0,20),(0x45,4,0,0x1fff),
+          (0xb1,0,0,14),(0x48,0,0,14),(0x15,0,1,67),(0x06,0,0,2048),(0x06,0,0,0)]
+
+
+def read(p):
+    try: return Path(p).read_text().strip()
+    except OSError: return ''
+
+
+def store(value):
+    temp = ROOT / 'eth0.new'
+    temp.write_text(json.dumps(value))
+    os.replace(temp, ROOT / 'eth0.json')
+
+
+def discover(mac, xid, unique):
+    b = bytearray(300)
+    struct.pack_into('!BBBBI', b, 0, 1, 1, 6, 0, xid)
+    b[28:34] = mac
+    b[236:240] = bytes.fromhex('63825363')
+    b[240:251] = bytes([53,1,1,55,5,1,3,6,54,51,255])
+    udp = struct.pack('!HHHH',68,67,8+len(b),0) + b
+    ip = bytearray(struct.pack('!BBHHHBBH4s4s',0x45,0,20+len(udp),0,0,64,17,0,b'\0'*4,b'\xff'*4))
+    total = sum(struct.unpack('!10H',ip))
+    while total >> 16: total = (total & 65535) + (total >> 16)
+    struct.pack_into('!H',ip,10,(~total)&65535)
+    dhcp = b'\xff'*6 + mac + b'\x08\x00' + ip + udp
+    tags = struct.pack('!HHHH',0x0101,0,0x0103,len(unique)) + unique
+    pppoe = (b'\xff'*6 + mac + b'\x88\x63' + struct.pack('!BBHH',0x11,9,0,len(tags)) + tags).ljust(60,b'\0')
+    return dhcp, pppoe
+
+
+def parse(frame, mac, xid, unique):
+    if len(frame) < 20 or frame[6:12] == mac:
+        return None
+    kind = frame[12:14]
+    if kind == b'\x08\x00':
+        ihl = (frame[14] & 15) * 4
+        if ihl < 20 or len(frame) < 14+ihl+8+240 or frame[23] != 17:
+            return None
+        udp = 14+ihl
+        if frame[udp:udp+4] != struct.pack('!HH',67,68): return None
+        b = frame[udp+8:]
+        if b[0:3] != b'\x02\x01\x06' or struct.unpack_from('!I',b,4)[0] != xid or b[28:34] != mac or b[236:240] != bytes.fromhex('63825363'):
+            return None
+        opts, i = {}, 240
+        while i < len(b):
+            t=b[i];i+=1
+            if t==255: break
+            if t==0: continue
+            if i>=len(b): return None
+            n=b[i];i+=1
+            if i+n>len(b): return None
+            opts[t]=b[i:i+n];i+=n
+        if opts.get(53)!=b'\x02': return None
+        gw=opts.get(3,opts.get(54,b''))
+        return {'kind':'dhcp','gateway':socket.inet_ntoa(gw[:4]) if len(gw)>=4 else ''}
+    if kind == b'\x88\x63':
+        if frame[14:16]!=b'\x11\x07' or frame[16:18]!=b'\0\0': return None
+        n=struct.unpack_from('!H',frame,18)[0]
+        if 20+n>len(frame): return None
+        tags, i=frame[20:20+n],0
+        while i+4<=len(tags):
+            t,l=struct.unpack_from('!HH',tags,i);i+=4
+            if i+l>len(tags): return None
+            if t==0x0103 and tags[i:i+l]==unique: return {'kind':'pppoe','gateway':''}
+            i+=l
+    return None
+
+
+def main():
+    if sys.argv[1:] != [PORT] or read('/tmp/sysinfo/model')!='NRadio-C2000Ultra':
+        return
+    if read('/tmp/sysinfo/board_name') not in ('NRadio-C2000MAX-Ultra','NRadio-C2000Ultra'):
+        return
+    ROOT.mkdir(exist_ok=True,mode=0o700)
+    with (ROOT/'eth0.lock').open('w') as lock:
+        try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError: return
+        if not Path('/sys/class/net/br-lan/brif/eth0').exists(): return
+        generation=read('/sys/class/net/eth0/carrier_up_count')
+        try: old=json.loads((ROOT/'eth0.json').read_text())
+        except (OSError,ValueError): old={}
+        tries=old.get('tries',0)+1 if old.get('generation')==generation else 1
+        result={'generation':generation,'tries':tries,'timestamp':time.time(),'state':'probing'}
+        store(result)
+        if read('/sys/class/net/eth0/carrier')!='1':
+            store(dict(result,state='off'));return
+        sock=None
+        try:
+            mac=bytes.fromhex(read('/sys/class/net/eth0/address').replace(':',''))
+            xid=int.from_bytes(os.urandom(4),'big');unique=os.urandom(8)
+            filt=ctypes.create_string_buffer(b''.join(struct.pack('HBBI',*x) for x in FILTER))
+            sock=socket.socket(socket.AF_PACKET,socket.SOCK_RAW,0)
+            sock.setsockopt(socket.SOL_SOCKET,26,struct.pack('HP',len(FILTER),ctypes.addressof(filt)))
+            sock.bind((PORT,3))
+            packets=discover(mac,xid,unique)
+            for p in packets: sock.send(p)
+            start=time.monotonic();resent=False;found=set();gateway=''
+            while time.monotonic()-start<2.5:
+                elapsed=time.monotonic()-start
+                if not resent and elapsed>=1:
+                    if not found:
+                        for p in packets: sock.send(p)
+                    resent=True
+                if found and elapsed>=1.5: break
+                if not select.select([sock],[],[],min(.2,max(0,2.5-elapsed)))[0]: continue
+                frame,addr=sock.recvfrom(2048)
+                if addr[2]==4: continue
+                r=parse(frame,mac,xid,unique)
+                if r:
+                    found.add(r['kind']);gateway=r['gateway'] or gateway
+            if read('/sys/class/net/eth0/carrier_up_count')!=generation: return
+            store(dict(result,state='router' if found else 'none',kind='both' if len(found)>1 else next(iter(found),'') ,gateway=gateway,timestamp=time.time()))
+        except (OSError,ValueError,struct.error):
+            store(dict(result,state='error',timestamp=time.time()))
+        finally:
+            if sock: sock.close()
+
+
+if __name__=='__main__':
+    os.umask(0o077)
+    main()

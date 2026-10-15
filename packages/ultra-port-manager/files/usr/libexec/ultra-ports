@@ -1,0 +1,481 @@
+#!/usr/bin/python3
+"""Ultra port 1 only. Preserve cellular configuration and provide timed rollback."""
+import contextlib
+import fcntl
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+VERSION = '20261015-r1'
+PORT, WAN, WAN6 = 'eth0', 'ultra_wan', 'ultra_wan6'
+CONFIG = Path('/etc/config')
+STATE = Path('/overlay/ultra-ports')
+RUNTIME = Path('/tmp/ultra-ports')
+TIMEOUT = 90
+OWNED = 'ultra-port-manager'
+PACKAGES = ('network', 'firewall')
+
+
+def run(args, data=None, timeout=15):
+    p = subprocess.run(args, input=data, capture_output=True, text=True, timeout=timeout)
+    if p.returncode:
+        raise ValueError('操作未完成：' + Path(args[0]).name)
+    return p.stdout
+
+
+def read(path, default=''):
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return default
+
+
+def atomic(path, data, mode=0o600):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, name = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(name, path)
+        d = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(d)
+        finally:
+            os.close(d)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def save(path, value):
+    atomic(path, (json.dumps(value, ensure_ascii=False) + '\n').encode())
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_state():
+    try:
+        return json.loads((STATE / 'pending.json').read_text())
+    except FileNotFoundError:
+        return None
+
+
+@contextlib.contextmanager
+def lock():
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(STATE, 0o700)
+    with (STATE / 'lock').open('w') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def supported():
+    return (read('/tmp/sysinfo/board_name') in ('NRadio-C2000MAX-Ultra', 'NRadio-C2000Ultra')
+            and read('/tmp/sysinfo/model') == 'NRadio-C2000Ultra'
+            and Path('/sys/class/net/eth0/phydev').exists()
+            and Path('/sys/class/net/eth1/phydev').exists())
+
+
+def require_board():
+    if not supported():
+        raise ValueError('此功能仅支持具有两个物理网口的C2000 Ultra')
+
+
+def parse_export(raw):
+    sections, row = [], None
+    for line in raw.splitlines():
+        p = shlex.split(line, comments=True)
+        if not p or p[0] == 'package':
+            continue
+        if p[0] == 'config' and len(p) >= 3:
+            row = {'id': p[2], 'type': p[1], 'options': {}}
+            sections.append(row)
+        elif p[0] in ('option', 'list') and len(p) == 3 and row is not None:
+            if p[0] == 'option':
+                row['options'][p[1]] = p[2]
+            else:
+                row['options'].setdefault(p[1], []).append(p[2])
+        elif p[0] == 'config':
+            raise ValueError('配置导出缺少节名称')
+    return sections
+
+
+def config(root=None):
+    root = root or CONFIG
+    return {p: parse_export(run(['uci', '-c', str(root), '-n', '-X', 'export', p])) for p in PACKAGES}
+
+
+def section(rows, name):
+    return next((x for x in rows if x['id'] == name), None)
+
+
+def values(value):
+    return value if isinstance(value, list) else str(value or '').split()
+
+
+def topology(cfg):
+    net = cfg['network']
+    lan = section(net, 'lan')
+    if not lan:
+        raise ValueError('找不到LAN配置')
+    brname = lan['options'].get('device', 'br-lan')
+    bridges = [x for x in net if x['type'] == 'device' and x['options'].get('name') == brname
+               and x['options'].get('type') == 'bridge']
+    if len(bridges) != 1:
+        raise ValueError('LAN网桥结构不受支持')
+    bridge = bridges[0]
+    ports = values(bridge['options'].get('ports'))
+    if 'eth1' not in ports:
+        raise ValueError('2口必须保留在LAN中，请先核实网桥配置')
+    if any(x['type'] == 'bridge-vlan' and x['options'].get('device') == brname for x in net):
+        raise ValueError('LAN使用了VLAN配置，请通过网络高级设置管理')
+    for name in (WAN, WAN6):
+        s = section(net, name)
+        if s and (s['type'] != 'interface' or s['options'].get('ultra_owner') != OWNED):
+            raise ValueError('有线WAN名称已被其他配置占用')
+    for s in net:
+        o = s['options']
+        if s['type'] == 'interface' and s['id'] not in (WAN, WAN6, 'lan') and PORT in values(o.get('device', o.get('ifname'))):
+            raise ValueError('1口已由其他接口管理，请先通过网络高级设置核实')
+    wan = section(net, WAN)
+    iswan = wan and wan['options'].get('device') == PORT and wan['options'].get('disabled') != '1'
+    if PORT in ports and iswan:
+        raise ValueError('1口同时归属LAN和WAN，请先修复配置')
+    mode = 'lan' if PORT in ports else 'wan' if iswan else 'unmanaged'
+    return lan, bridge, ports, wan, mode
+
+
+def validate(form, cfg):
+    if any(not isinstance(v, str) or len(v.encode()) > 1024 for v in form.values()):
+        raise ValueError('请求参数不正确或过长')
+    mode = form.get('mode')
+    if mode not in ('lan', 'wan'):
+        raise ValueError('网口模式不正确')
+    lan, bridge, ports, old, current = topology(cfg)
+    if current == 'unmanaged':
+        raise ValueError('1口当前不属于此功能管理，请先核实接口')
+    proto = form.get('proto', 'dhcp')
+    opts = {}
+    if mode == 'wan':
+        if proto not in ('dhcp', 'pppoe', 'static'):
+            raise ValueError('上网方式不正确')
+        if proto == 'pppoe':
+            user, password = form.get('username', ''), form.get('password', '')
+            for v in (user, password):
+                if not isinstance(v, str) or len(v.encode()) > 128 or any(ord(x) < 32 or ord(x) == 127 for x in v):
+                    raise ValueError('宽带账号或密码包含不支持的字符或过长')
+            if not user:
+                raise ValueError('请填写宽带账号')
+            if not password:
+                password = (old or {}).get('options', {}).get('password', '')
+            if not password:
+                raise ValueError('请填写宽带密码')
+            opts.update(username=user, password=password, ipv6='1')
+        if proto == 'static':
+            try:
+                ip = ipaddress.IPv4Address(form.get('ipaddr', ''))
+                mask = form.get('netmask', '255.255.255.0')
+                net = ipaddress.IPv4Network(str(ip) + '/' + mask, strict=False)
+                if str(ip).split('.')[0] == '0' or ip.is_loopback or ip.is_multicast or ip.is_reserved or net.prefixlen == 0:
+                    raise ValueError()
+                if net.prefixlen <= 30 and ip in (net.network_address, net.broadcast_address):
+                    raise ValueError()
+                gateway = ipaddress.IPv4Address(form.get('gateway', ''))
+                if gateway == ip or gateway not in net or gateway.is_multicast or gateway.is_unspecified:
+                    raise ValueError()
+                lip = values(lan['options'].get('ipaddr'))[0]
+                ln = ipaddress.IPv4Network(lip if '/' in lip else lip + '/' + lan['options'].get('netmask', '255.255.255.0'), strict=False)
+                if net.overlaps(ln):
+                    raise ValueError('same_lan')
+                dns = [str(ipaddress.IPv4Address(x)) for x in re.split(r'[\s,，]+', form.get('dns', '').strip()) if x]
+                if len(dns) > 4:
+                    raise ValueError()
+                opts.update(ipaddr=str(ip), netmask=str(net.netmask), gateway=str(gateway), dns=dns)
+            except (ValueError, IndexError):
+                raise ValueError('请核对静态IP、掩码、网关和DNS；有线与LAN不能处于相同网段') from None
+    return mode, proto, opts, (lan, bridge, ports, old, current)
+
+
+def commands(form, cfg):
+    mode, proto, opts, (lan, bridge, ports, old, current) = validate(form, cfg)
+    if mode == current == 'lan':
+        return [], mode
+    zones = [x for x in cfg['firewall'] if x['type'] == 'zone' and x['options'].get('name') == 'wan']
+    if len(zones) != 1:
+        raise ValueError('找不到唯一的WAN防火墙区域')
+    zone = zones[0]
+    lines = []
+    def put(p, s, k, v):
+        key = p + '.' + s + ('.' + k if k else '')
+        if not re.fullmatch(r'[\w.]+', key):
+            raise ValueError('配置名称不受支持')
+        if v is None or isinstance(v, list):
+            prior = section(cfg[p], s)
+            if prior and k in prior['options']:
+                lines.append('delete ' + key)
+            if isinstance(v, list):
+                lines.extend('add_list ' + key + '=' + shlex.quote(x) for x in v)
+        else:
+            lines.append('set ' + key + '=' + shlex.quote(v))
+    newports = [x for x in ports if x != PORT]
+    if mode == 'lan':
+        newports.append(PORT)
+    put('network', bridge['id'], 'ports', newports)
+    if mode == 'wan':
+        for name, device, protocol in ((WAN, PORT, proto), (WAN6, '@' + WAN, 'dhcpv6')):
+            put('network', name, None, 'interface')
+            for k, v in {'device': device, 'proto': protocol, 'ultra_owner': OWNED, 'metric': '50',
+                         'disabled': '0', 'auto': '1', 'peerdns': '0', 'defaultroute': '1' if name == WAN else '0'}.items():
+                put('network', name, k, v)
+        put('network', WAN6, 'delegate', '0')
+        # Start with a clean protocol-specific set; never touch QModem sections.
+        for key in ('username', 'password', 'ipv6', 'ipaddr', 'netmask', 'gateway', 'dns'):
+            put('network', WAN, key, opts.get(key))
+    else:
+        for name in (WAN, WAN6):
+            if section(cfg['network'], name):
+                for k, v in {'disabled': '1', 'auto': '0', 'device': None}.items():
+                    put('network', name, k, v)
+    networks = [x for x in values(zone['options'].get('network')) if x not in (WAN, WAN6)]
+    if mode == 'wan':
+        networks += [WAN, WAN6]
+    put('firewall', zone['id'], 'network', networks)
+    return lines, mode
+
+
+def state_public(s):
+    if not s:
+        return None
+    return {k: s.get(k) for k in ('id', 'phase', 'deadline', 'mode', 'error')}
+
+
+def status():
+    require_board()
+    lan, bridge, ports, wan, mode = topology(config())
+    opts = wan['options'] if wan else {}
+    return {'ok': True, 'version': VERSION, 'port': PORT, 'label': '1口', 'mode': mode,
+            'carrier': read('/sys/class/net/eth0/carrier') == '1', 'proto': opts.get('proto', 'dhcp'),
+            'username': opts.get('username', ''), 'has_pass': bool(opts.get('password')),
+            'ipaddr': opts.get('ipaddr', ''), 'netmask': opts.get('netmask', '255.255.255.0'),
+            'gateway': opts.get('gateway', ''), 'dns': ' '.join(values(opts.get('dns'))),
+            'lan_ip': values(lan['options'].get('ipaddr', '192.168.66.1'))[0].split('/')[0],
+            'policy': '保留5G主出口；有线WAN的IPv4路由优先级为50，不启用断网自动切换。',
+            'pending': state_public(load_state())}
+
+
+def restore(s, reload_network=True):
+    backup = STATE / 'backups' / s['id']
+    if not re.fullmatch(r'[a-f0-9]{24}', s['id']):
+        raise ValueError('回退记录不正确')
+    for p in PACKAGES:
+        now = digest(CONFIG / p)
+        if now not in (s['before'][p], s['after'][p]):
+            s.update(phase='rollback_conflict', error='检测到后续网络编辑，已保留现场和备份，请人工核实')
+            save(STATE / 'pending.json', s)
+            return False
+        if digest(backup / p) != s['before'][p]:
+            raise ValueError('回退备份校验失败')
+    for p in PACKAGES:
+        atomic(CONFIG / p, (backup / p).read_bytes(), s['modes'][p])
+    if reload_network:
+        reconfigure()
+    s['phase'] = 'rolled_back'
+    save(STATE / 'last.json', state_public(s))
+    (STATE / 'pending.json').unlink(missing_ok=True)
+    return True
+
+
+def reconfigure():
+    run(['/etc/init.d/network', 'reload'], timeout=30)
+    run(['/etc/init.d/firewall', 'reload'], timeout=35)
+
+
+def start_guard(ident):
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'guard', ident],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True, close_fds=True)
+
+
+def apply(form):
+    require_board()
+    with lock():
+        if load_state():
+            raise ValueError('已有待确认的切换，请先确认或回退')
+        if any(run(['uci', '-q', 'changes', p]).strip() for p in PACKAGES):
+            raise ValueError('网络或防火墙有未应用的修改，请先处理')
+        cfg = config()
+        lines, mode = commands(form, cfg)
+        if not lines:
+            return {'ok': True, 'changed': False, 'mode': mode}
+        with tempfile.TemporaryDirectory(prefix='ultra-ports-stage-') as d:
+            stage = Path(d)
+            delta = stage / '.delta'
+            delta.mkdir()
+            for p in PACKAGES:
+                shutil.copyfile(CONFIG / p, stage / p)
+            # Delete of absent protocol fields is harmless in UCI batch. Validate
+            # the resulting full configuration, rather than accepting its exit alone.
+            run(['uci', '-c', str(stage), '-t', str(delta), 'batch'], '\n'.join(lines + ['commit network', 'commit firewall']) + '\n')
+            staged = config(stage)
+            _, _, newports, own, actual_mode = topology(staged)
+            if actual_mode != mode or 'eth1' not in newports:
+                raise ValueError('生成的网口配置未通过检查')
+            for p in PACKAGES:
+                untouched = [x for x in cfg[p] if x['id'] not in (WAN, WAN6) and not (p == 'network' and x['id'] == topology(cfg)[1]['id'])
+                             and not (p == 'firewall' and x['type'] == 'zone' and x['options'].get('name') == 'wan')]
+                if any(section(staged[p], x['id']) != x for x in untouched):
+                    raise ValueError('检测到超出网口功能范围的配置变化')
+            ident = secrets.token_hex(12)
+            backup = STATE / 'backups' / ident
+            backup.mkdir(parents=True, mode=0o700)
+            s = {'id': ident, 'phase': 'prepared', 'mode': mode, 'deadline': time.time() + TIMEOUT,
+                 'boot': read('/proc/sys/kernel/random/boot_id'), 'before': {}, 'after': {}, 'modes': {}}
+            for p in PACKAGES:
+                atomic(backup / p, (CONFIG / p).read_bytes())
+                s['before'][p] = digest(backup / p)
+                s['after'][p] = digest(stage / p)
+                s['modes'][p] = (CONFIG / p).stat().st_mode & 0o777
+                if digest(CONFIG / p) != s['before'][p]:
+                    raise ValueError('配置在准备期间已改变，请重试')
+            save(STATE / 'pending.json', s)
+            try:
+                for p in PACKAGES:
+                    atomic(CONFIG / p, (stage / p).read_bytes(), s['modes'][p])
+                s['phase'] = 'applying'
+                save(STATE / 'pending.json', s)
+                start_guard(ident)
+            except Exception:
+                restore(s)
+                raise
+        return {'ok': True, 'changed': True, 'mode': mode, 'pending': state_public(s), 'timeout': TIMEOUT}
+
+
+def guard(ident):
+    time.sleep(2)  # Let the authenticated HTTP response reach the browser first.
+    with lock():
+        s = load_state()
+        if not s or s['id'] != ident:
+            return
+        try:
+            reconfigure()
+            s['phase'] = 'awaiting_confirmation'
+            save(STATE / 'pending.json', s)
+        except Exception:
+            restore(s)
+            return
+    while time.time() < s['deadline']:
+        time.sleep(1)
+        current = load_state()
+        if not current or current['id'] != ident:
+            return
+    with lock():
+        current = load_state()
+        if current and current['id'] == ident:
+            restore(current)
+
+
+def finish(form, rollback=False):
+    require_board()
+    with lock():
+        s = load_state()
+        if not s or s['id'] != form.get('id'):
+            raise ValueError('此切换记录已结束，请刷新状态')
+        if rollback:
+            return {'ok': restore(s)}
+        if s['phase'] != 'awaiting_confirmation' or time.time() >= s['deadline']:
+            raise ValueError('切换尚未完成或已到回退时间')
+        if any(digest(CONFIG / p) != s['after'][p] for p in PACKAGES):
+            raise ValueError('配置在切换后已改变，请先核实')
+        s['phase'] = 'confirmed'
+        if s['mode'] == 'lan':
+            save(RUNTIME / 'eth0.ignore', {'generation': read('/sys/class/net/eth0/carrier_up_count', '0')})
+        save(STATE / 'last.json', state_public(s))
+        (STATE / 'pending.json').unlink()
+        return {'ok': True, 'mode': s['mode']}
+
+
+def recover():
+    with lock():
+        s = load_state()
+        if s and (s.get('boot') != read('/proc/sys/kernel/random/boot_id') or time.time() >= s['deadline']):
+            restore(s, reload_network=False)
+
+
+def probe(ignore=False):
+    require_board()
+    current = status()
+    if current['mode'] != 'lan' or current['pending'] or not current['carrier']:
+        return {'ok': True, 'state': 'off', 'carrier': current['carrier']}
+    RUNTIME.mkdir(mode=0o700, exist_ok=True)
+    cnt = read('/sys/class/net/eth0/carrier_up_count', '0')
+    path = RUNTIME / 'eth0.json'
+    try:
+        r = json.loads(path.read_text())
+    except (FileNotFoundError, ValueError):
+        r = {}
+    if r.get('generation') != cnt:
+        r = {}
+    if ignore:
+        if r:
+            save(RUNTIME / 'eth0.ignore', {'generation': cnt})
+        return {'ok': True}
+    age = time.time() - r.get('timestamp', 0)
+    if not r or (r.get('state') == 'probing' and age > 15) or (r.get('state') not in ('router', 'probing') and r.get('tries', 0) < 4 and age >= 20):
+        subprocess.Popen(['/usr/libexec/ultra-port-probe', PORT], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    ignored = False
+    try:
+        ignored = json.loads((RUNTIME / 'eth0.ignore').read_text()).get('generation') == cnt
+    except (FileNotFoundError, ValueError):
+        pass
+    return {'ok': True, 'state': r.get('state', 'probing'), 'kind': r.get('kind', ''),
+            'gateway': r.get('gateway', ''), 'ignored': ignored, 'carrier': True}
+
+
+def main():
+    action = sys.argv[1] if len(sys.argv) > 1 else 'status'
+    if action == 'guard':
+        guard(sys.argv[2]); return
+    if action == 'recover':
+        recover(); return
+    data = sys.stdin.buffer.read(8193) if action in ('apply', 'confirm', 'rollback', 'ignore') else b'{}'
+    if len(data) > 8192:
+        raise ValueError('请求过长')
+    form = json.loads(data or b'{}')
+    if not isinstance(form, dict):
+        raise ValueError('请求格式不正确')
+    if action == 'status': result = status()
+    elif action == 'apply': result = apply(form)
+    elif action == 'confirm': result = finish(form)
+    elif action == 'rollback': result = finish(form, True)
+    elif action == 'probe': result = probe()
+    elif action == 'ignore': result = probe(True)
+    else: raise ValueError('操作不支持')
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    os.umask(0o077)
+    try:
+        main()
+    except (ValueError, OSError, subprocess.SubprocessError):
+        # Error text may be displayed, but never dump subprocess output/configuration.
+        error = sys.exc_info()[1]
+        msg = str(error) if isinstance(error, ValueError) else '操作失败，请检查系统日志或回退备份'
+        print(json.dumps({'ok': False, 'error': msg}, ensure_ascii=False))

@@ -5,4 +5,19 @@ set -eu
 request=$(jq -cn --arg port "$1" --arg command "$2" '{at_port:$port,at_cmd:$command,timeout:5}')
 reply=$(ubus -t 7 call at-daemon sendat "$request") || exit 1
 [ "$(printf '%s' "$reply" | jsonfilter -e '@.status')" = success ] || exit 1
-printf '%s' "$reply" | jsonfilter -e '@.response'
+printf '%s' "$reply" | jsonfilter -e '@.response' | awk -v command="$2" '
+BEGIN {
+    command=toupper(command)
+    sub(/^AT/, "", command)
+    sub(/[=?].*$/, "", command)
+    identity=(command ~ /^(I|\+CGMI|\+CGMM|\+CGMR|\+CGSN|\+GSN|\+CIMI)$/)
+}
+{
+    line=$0
+    sub(/\r$/, "", line)
+    prefix=line
+    sub(/:.*/, "", prefix)
+    telemetry=(line ~ /^\^(PDCPDATAINFO|CERSSI|HCSQ|RSSI|HRSSILVL|DSFLOWRPT|RRCSTAT|NWTIME|MODE|SRVST|SIMST|BOOT):/)
+    if ((telemetry || (identity && line ~ /^[\^+][A-Z0-9_]+:/)) && prefix!=command) next
+    print
+}'

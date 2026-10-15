@@ -619,6 +619,7 @@ end
 local INFO_CACHE_DIR = "/tmp/run/mwrt"
 local INFO_CACHE_MAX_AGE = 120   -- 缓存最多顶这么久,再旧就认账、显示真实状态
 local INFO_CACHE_FRESH = 2       -- 这么新的缓存直接复用,不再跑 AT
+local modem_fields = require "luci.model.ultra_modem_fields"
 
 local function info_cache_path(cfg_id)
 	local safe = tostring(cfg_id):gsub("[^%w_%-]", "_")
@@ -658,6 +659,7 @@ local function info_read_cache(path)
 	if not raw or raw == "" then return nil end
 	local c = json.parse(raw)
 	if type(c) ~= "table" or type(c["modem_info"]) ~= "table" then return nil end
+	c["modem_info"] = modem_fields.list(c["modem_info"])
 	local age = os.time() - (tonumber(c["time"]) or 0)
 	if age < 0 or age > INFO_CACHE_MAX_AGE then return nil end
 	c["age"] = age
@@ -712,6 +714,7 @@ local function modem_info_sticky(cfg_id, path, raw)
 		if cached then return info_from_cache(cached, true) end
 		return nil
 	end
+	parsed["modem_info"] = modem_fields.list(parsed["modem_info"])
 	if info_is_complete(parsed["modem_info"]) then
 		info_write_cache(path, parsed["modem_info"])
 		return parsed

@@ -1,0 +1,50 @@
+{
+  "release": "ultra-maintenance-20261015-1",
+  "format": "configuration-preserving maintenance archive",
+  "version": "20261015-r1",
+  "installed_on_live_router": true,
+  "router_rebooted": false,
+  "WAN_LAN_switch_confirmed": true,
+  "timed_rollback_confirmed": true,
+  "rollback_seconds": 90.5,
+  "field_validation": "AT/URC demultiplexing and 15-digit IMEI validation",
+  "sidebar_and_mobile_browser_verified": true,
+  "source_backup_verified": true,
+  "private_configuration_included": false,
+  "runtime": {
+    "seconds": 120.3,
+    "cpu_percent_mean_max": [
+      33.71,
+      47.28
+    ],
+    "mem_available_mib_range": [
+      144.48,
+      200.04
+    ],
+    "pcdn_upload_mbps_mean": 60.988
+  },
+  "checks": {
+    "all_browser_checks": true,
+    "WAN_then_LAN_confirmed": true,
+    "automatic_rollback": true,
+    "final_LAN": true,
+    "modem_model_valid": true,
+    "IMEI_valid": true,
+    "no_URC_in_fields": true,
+    "sms_state_preserved": true,
+    "only_network_and_firewall_changed": true,
+    "pcdn_and_5g_carrier_up": true,
+    "no_interface_errors": true,
+    "no_reboot": true,
+    "all_connectivity_probes": true,
+    "single_AT_port": true,
+    "all_services_running": true,
+    "guard_enabled": true,
+    "diagnostic_removed": true
+  },
+  "passed": true,
+  "pending_validation": [
+    "Upstream wired DHCP and PPPoE with a physical cable",
+    "New incoming SMS with PushPlus"
+  ]
+}

@@ -1,0 +1,4 @@
+#!/bin/sh /etc/rc.common
+# Before netifd starts, restore an unconfirmed transaction after a power cycle.
+START=19
+start() { /usr/libexec/ultra-ports recover; }

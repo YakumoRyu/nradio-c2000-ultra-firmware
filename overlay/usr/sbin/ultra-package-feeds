@@ -7,7 +7,7 @@ umask 022
 mkdir -p /etc/opkg
 printf '# Matching optional Ultra packages; regenerate with ultra-package-feeds.\n' > "$temp"
 [ ! -f "$file" ] || grep -vE '^src/gz ultra_|^# Matching|^# Extract' "$file" >> "$temp" || true
-if [ -f "$repo/RELEASE" ] && [ "$(cat "$repo/RELEASE")" = ultra-25.12-20261013-r3 ]; then
+if [ -f "$repo/RELEASE" ] && [ "$(cat "$repo/RELEASE")" = ultra-25.12-20261015-r4 ]; then
  for dir in "$repo"/*; do
   [ -f "$dir/Packages.gz" ] && [ -f "$dir/Packages.sig" ] || continue
   name="${dir##*/}"

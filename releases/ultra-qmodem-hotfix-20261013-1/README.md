@@ -2,7 +2,7 @@
 
 适用：本项目NRadio-C2000MAX-Ultra的25.12 TF系统，QModem监测脚本仍使用已维护的结构。这个IPK修复AT查询成功后异常计数未清零的问题；四次分散异常不再累计触发重拨，连续四次异常仍保留恢复拨号。
 
-下载`ultra-qmodem-hotfix_20261013-r1_aarch64_cortex-a53.ipk`，约3.8KB。它是独立补丁包，保留现有配置，不包含内核或完整系统，不应上传到系统刷机入口。
+下载`ultra-qmodem-hotfix_20261013-r1_aarch64_cortex-a53.ipk`，约3.8KB。通过软件包管理器安装，保留现有配置。
 
 ## 安装
 
@@ -32,4 +32,4 @@ opkg install /tmp/ultra-qmodem-hotfix_20261013-r1_aarch64_cortex-a53.ipk
 
 普通重启后补丁保留；恢复出厂会清理可写区的IPK和热补丁。希望恢复出厂后仍保留修复，应安装[完整r3固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261013-r3)，其中修复已编入ROM。
 
-本修复针对已复现的异常计数逻辑，不承诺提升带宽或恢复PCDN日收益。短时业务验收也不等于全天收益验收。没有在本轮产生新的短信进行转发端到端测试。
+验收覆盖异常计数、在线安装与短时上传。新短信转发待真实短信复验。

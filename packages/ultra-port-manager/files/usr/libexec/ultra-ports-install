@@ -1,0 +1,45 @@
+#!/usr/bin/python3
+"""Add/remove only our authenticated homepage loader; retain a checked backup."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+PAGE = Path('/usr/lib/lua/luci/view/zmode/modem_info.htm')
+DIR = Path('/overlay/ultra-ports/install')
+MARK = '<!-- ultra-port-manager:20261015-r1 -->'
+LOADER = MARK + '\n<script src="<%=resource%>/ultra-ports.js?v=20261015-r1" data-api="<%=luci.dispatcher.build_url(\'admin/network/ultra_ports\')%>"></script>\n'
+
+def install():
+    action = sys.argv[1] if len(sys.argv)>1 else 'install'
+    raw = PAGE.read_bytes()
+    if action == 'remove':
+        # Do not remove a live network transaction or silently undo its networking.
+        if Path('/overlay/ultra-ports/pending.json').exists():
+            raise ValueError('先确认或回退待处理的网口切换，再卸载')
+        if LOADER.encode() not in raw: return
+        data = raw.replace(LOADER.encode(),b'',1)
+    elif action == 'install':
+        if MARK.encode() in raw: return
+        if raw.count(b'<%+footer%>')!=1: raise ValueError('首页结构已改变，需先核对源码')
+        DIR.mkdir(parents=True,exist_ok=True,mode=0o700)
+        backup = DIR/'home.before.htm'
+        if not backup.exists():
+            backup.write_bytes(raw);os.chmod(backup,0o600)
+        data = raw.replace(b'<%+footer%>',LOADER.encode()+b'<%+footer%>',1)
+    else: raise ValueError('未知操作')
+    path=PAGE.with_suffix('.ultra-new')
+    path.write_bytes(data);os.chmod(path,PAGE.stat().st_mode&0o777);os.replace(path,PAGE)
+    if action=='install':
+        (DIR/'manifest.json').write_text(json.dumps({'before':hashlib.sha256(raw).hexdigest(),'after':hashlib.sha256(data).hexdigest(),'version':'20261015-r1'}))
+        os.chmod(DIR/'manifest.json',0o600)
+    # Lua controller menu caches only; no network/service restart is necessary.
+    for p in Path('/tmp').glob('luci-indexcache*'):
+        if p.is_file(): p.unlink()
+
+if __name__=='__main__':
+    os.umask(0o077)
+    try: install()
+    except (ValueError,OSError) as e:
+        print('网口界面安装未完成：'+str(e),file=sys.stderr);sys.exit(1)

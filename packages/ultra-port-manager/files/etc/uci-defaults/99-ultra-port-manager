@@ -1,0 +1,4 @@
+#!/bin/sh
+# ROM installs preserve only generic functionality; user network roles stay LAN.
+[ ! -x /etc/init.d/ultra-ports-guard ] || /etc/init.d/ultra-ports-guard enable
+exit 0
