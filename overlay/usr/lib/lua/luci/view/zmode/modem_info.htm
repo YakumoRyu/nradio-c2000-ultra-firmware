@@ -1175,14 +1175,22 @@ const mnc=mncE?(mncE.value||'').toString().trim().padStart(2,'0'):'';
 const imsi=imsiE?(imsiE.value||'').toString().replace(/\s/g,''):'';
 const imsiPlmn=imsi.length>=5?imsi.substring(0,5):'';
 let src='',nm='';
-const detect=(s)=>{if(/移动|CM|Mobile|46000|46002|46004|46007|46008/i.test(s))return['/logo/chinamobile.png','中国移动'];if(/联通|CU|United|46001|46006|46009/i.test(s))return['/logo/chinaunicom.png','中国联通'];if(/电信|CHN-CT|Telecom|CT|46003|46005|46011/i.test(s))return['/logo/ctc.png','中国电信'];if(/广电|CBN|46015/i.test(s))return['/logo/cbn.png','中国广电'];return['',''];};
+const detect=(s)=>{if(/移动|CM|Mobile|46000|46002|46004|46007|46008/i.test(s))return['/logo/chinamobile.png?v=20261016','中国移动'];if(/联通|CU|United|46001|46006|46009/i.test(s))return['/logo/chinaunicom.png?v=20261016','中国联通'];if(/电信|CHN-CT|Telecom|CT|46003|46005|46011/i.test(s))return['/logo/ctc.png?v=20261016','中国电信'];if(/广电|CBN|46015/i.test(s))return['/logo/cbn.png?v=20261016','中国广电'];return['',''];};
 if(imsiPlmn){const r0=detect(imsiPlmn);if(r0[0]){src=r0[0];nm=r0[1];}}
 if(!nm){const r1=detect(opV);if(r1[0]){src=r1[0];nm=r1[1];}}
 if(!nm&&mcc&&mnc){const r2=detect(mcc+mnc);if(r2[0]){src=r2[0];nm=r2[1];}}
 // 必须显式清掉: 读不到 IMSI 时返回的 "+CME ERROR: 10" 会被压成 "+CMEE",
 // 而 detect() 的 /CM/i 正好命中它 —— 这就是没插卡也显示中国移动的原因。
 if(!dialed){src='';nm='';}
-if(logo){if(src){logo.dataset.op=src;logo.src=src;logo.style.display='';}else if(dialed&&logo.dataset.op){logo.src=logo.dataset.op;logo.style.display='';}else{delete logo.dataset.op;logo.removeAttribute('src');logo.style.display='none';}}if(opN){if(!dialed){opN.textContent=(warming&&!csE)?'读取中…':'等待网络注册';}else if(nm){opN.textContent=nm;}else if(opV&&opV.length>0&&opV!=='--'){opN.textContent=opV;}else if(imsiPlmn){opN.textContent='PLMN '+imsiPlmn;}else if(mcc&&mnc){opN.textContent='PLMN '+mcc+'-'+mnc;}else{opN.textContent='等待网络注册';}}
+if(logo){
+const desired=src||(dialed&&logo.dataset.op)||'';
+if(desired){
+logo.dataset.op=desired;logo.alt=nm||'运营商';
+if(logo.dataset.failed===desired){logo.style.display='none';}
+else if(logo.getAttribute('src')!==desired){logo.style.display='none';logo.src=desired;}
+else if(logo.complete&&logo.naturalWidth>0){logo.style.display='';}
+}else{delete logo.dataset.op;delete logo.dataset.failed;logo.removeAttribute('src');logo.style.display='none';}
+}if(opN){if(!dialed){opN.textContent=(warming&&!csE)?'读取中…':'等待网络注册';}else if(nm){opN.textContent=nm;}else if(opV&&opV.length>0&&opV!=='--'){opN.textContent=opV;}else if(imsiPlmn){opN.textContent='PLMN '+imsiPlmn;}else if(mcc&&mnc){opN.textContent='PLMN '+mcc+'-'+mnc;}else{opN.textContent='等待网络注册';}}
 const modeE=data.find(e=>this.mt(e,/^mode$|^network_?mode$|网络模式|network mode|network type/i));const cellE=data.find(e=>this.mt(e,/^cell.?id$|小区ID|^CID$/i));
 const pciE=data.find(e=>this.mt(e,/Physical Cell|^PCI$|物理小区/i));
 const tacE=data.find(e=>this.mt(e,/^TAC$|^LAC$|tracking area/i));
@@ -1428,7 +1436,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 <!-- Hero: cellular (hidden if no modem data) -->
 <div id="hero-w" class="hid"><div class="hero">
-<div class="hero-sig"><div class="h-side"><div class="h-op-row"><div class="h-op-name" id="h-op">--</div><div class="h-op-sub"><i class="fas fa-circle"></i><span id="h-op-status">在线</span></div></div><div class="h-bdg" id="h-bdg"><span class="bdg bdg-x"><i class="fas fa-signal"></i> --</span></div><div class="sig-r"><div class="sig-rg" id="h-ring"><svg viewBox="0 0 100 100"><circle class="sr-bg" cx="50" cy="50" r="38"/><circle class="sr-fg" cx="50" cy="50" r="38" stroke-dasharray="238.8" stroke-dashoffset="238.8" stroke="#34d399"/></svg><div class="ct"><span class="v">--</span><span class="l">RSRP</span></div></div><div class="sig-nfo"><div class="dbm" id="h-dbm">-- dBm</div><div class="sig-bars" id="h-bars"><span style="height:9px"></span><span style="height:13px"></span><span style="height:17px"></span><span style="height:21px"></span><span style="height:25px"></span></div><div class="sl" id="h-sl">信号强度</div></div></div></div><div class="h-logo-area"><img id="h-logo" src="" alt="" style="display:none"><div class="h-logo-meta"><div class="h-logo-mode" id="h-mode">--</div><div class="h-logo-tac" id="h-cellid">CID --</div></div></div></div>
+<div class="hero-sig"><div class="h-side"><div class="h-op-row"><div class="h-op-name" id="h-op">--</div><div class="h-op-sub"><i class="fas fa-circle"></i><span id="h-op-status">在线</span></div></div><div class="h-bdg" id="h-bdg"><span class="bdg bdg-x"><i class="fas fa-signal"></i> --</span></div><div class="sig-r"><div class="sig-rg" id="h-ring"><svg viewBox="0 0 100 100"><circle class="sr-bg" cx="50" cy="50" r="38"/><circle class="sr-fg" cx="50" cy="50" r="38" stroke-dasharray="238.8" stroke-dashoffset="238.8" stroke="#34d399"/></svg><div class="ct"><span class="v">--</span><span class="l">RSRP</span></div></div><div class="sig-nfo"><div class="dbm" id="h-dbm">-- dBm</div><div class="sig-bars" id="h-bars"><span style="height:9px"></span><span style="height:13px"></span><span style="height:17px"></span><span style="height:21px"></span><span style="height:25px"></span></div><div class="sl" id="h-sl">信号强度</div></div></div></div><div class="h-logo-area"><img id="h-logo" src="" alt="" style="display:none" onload="delete this.dataset.failed;this.style.display=''" onerror="this.dataset.failed=this.getAttribute('src');this.style.display='none'"><div class="h-logo-meta"><div class="h-logo-mode" id="h-mode">--</div><div class="h-logo-tac" id="h-cellid">CID --</div></div></div></div>
 <div class="hero-qs"><div class="qs"><div class="qs-i" style="color:#60a5fa"><i class="fas fa-clock"></i></div><div class="qs-v" id="qs-up">--</div><div class="qs-l">运行时间</div></div><div class="qs"><div class="qs-i" style="color:#34d399"><i class="fas fa-wifi"></i></div><div class="qs-v" id="qs-dev">--</div><div class="qs-l">在线设备</div></div><div class="qs"><div class="qs-i" style="color:#fbbf24"><i class="fas fa-database"></i></div><div class="qs-v" id="qs-stor">--</div><div class="qs-l">存储占用</div></div><div class="qs"><div class="qs-i" style="color:#f472b6"><i class="fas fa-tachometer-alt"></i></div><div class="qs-v" id="qs-load">--</div><div class="qs-l">系统负载</div></div></div>
 </div></div>
 
