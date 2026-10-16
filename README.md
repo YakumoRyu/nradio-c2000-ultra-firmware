@@ -8,22 +8,22 @@
 | 内核 | Linux6.12.103 |
 | 无线 | 联发科闭源驱动8.3.1.2 |
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r2 |
-| 完整固件 | ultra-25.12-20261015-r4 |
-| 升级包 | ultra-maintenance-20261015-1 |
+| 完整固件 | ultra-25.12-20261016-r5 |
+| 升级包 | ultra-cpu-hotfix-20261016-1 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261015-1) | 在现有Ultra25.12 TF系统上安装网口管理、模组字段与侧栏显示修复，保留配置。 |
-| [完整r4固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261015-r4) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-cpu-hotfix-20261016-1) | 在已安装r4网口更新的Ultra25.12 TF系统上安装CPU与首页修复，保留配置。 |
+| [完整r5固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261016-r5) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-升级包已在运行中的Ultra安装，并完成浏览器操作、WAN/LAN切换和90秒自动回退验收。完整r4已完成构建、镜像审计和用户态检查，当前为待实机启动验收的预发布版本。
+本次CPU与首页修复已在运行中的Ultra安装，5G、IPv4/IPv6、UPnP和媒体检查通过。升级包另经安装与回退测试；完整r5完成构建、镜像审计和用户态检查，按待实机启动验收的预发布版本提供。
 
 完整固件约206MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261015-1/README.md)
+- [升级包安装与回退](releases/ultra-cpu-hotfix-20261016-1/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)
@@ -31,6 +31,8 @@
 - [项目记忆](docs/PROJECT_MEMORY.md)
 
 ## 已集成的改动
+
+- **CPU与首页优化**：减少分钟自愈检查创建的进程，使用共享非阻塞CPU采样和原生状态读取，修复旧PCDN接口JSON报错。
 
 - **网口1切换WAN/LAN**：支持DHCP、PPPoE和静态IPv4；上级网关接入提示；90秒确认与自动回退。
 - **新版网口弹窗**：居中卡片、模糊背景、渐变图标、简洁信息行和紫色操作按钮，适配桌面与手机。

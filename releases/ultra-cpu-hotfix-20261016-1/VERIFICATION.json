@@ -1,0 +1,65 @@
+{
+  "release": "ultra-cpu-hotfix-20261016-1",
+  "format": "configuration-preserving CPU maintenance archive",
+  "version": "20261016-r1",
+  "payload_files": 5,
+  "installed_fixes_on_live_router": true,
+  "final_archive_noop_on_live_router": true,
+  "router_rebooted": false,
+  "isolated_archive_install_and_rollback": {
+    "installed_five_files": true,
+    "all_installed_bytes_match": true,
+    "second_install_no_changes": true,
+    "rollback_executed": true,
+    "rollback_restored_originals": true
+  },
+  "private_configuration_included": false,
+  "checks": {
+    "source_and_live_match": true,
+    "same_boot": true,
+    "services_running": true,
+    "cellular_up": true,
+    "AT_owner_unchanged": true,
+    "links_up": true,
+    "public_IPv4_IPv6_probes": true,
+    "device_status_keys_preserved": true,
+    "device_status_identity_preserved": true,
+    "browser_no_JS_errors": true,
+    "no_recent_JSON_error_or_stall": true,
+    "media_api_healthy": true,
+    "watchdog_cpu_reduced": true
+  },
+  "watchdog_measurements": {
+    "before": {
+      "elapsed": 0.6579680810682476,
+      "subtree_cpu_seconds": 0.747853,
+      "system_forks_during": 443,
+      "max_child_rss_kib": 9448,
+      "rc": 0
+    },
+    "after": {
+      "elapsed": 0.08403846703004092,
+      "subtree_cpu_seconds": 0.07346899999999999,
+      "system_forks_during": 29,
+      "max_child_rss_kib": 9432,
+      "rc": 0
+    },
+    "cpu_reduction_percent": 90.2
+  },
+  "status_api_measurements": {
+    "before_mean": 1.1837524749862496,
+    "after_warm_mean": 0.1169267666603749
+  },
+  "five_minute_sample": {
+    "seconds": 298.2,
+    "cpu_mean_percent": 13.63,
+    "cpu_peak_percent": 50,
+    "cpu_p95_percent": 30.24,
+    "memory_available_min_mib": 195.19,
+    "whole_router_over_80_samples": 0
+  },
+  "passed": true,
+  "pending_validation": [
+    "Incident capture for reported multi-minute web/admin slowdowns"
+  ]
+}
