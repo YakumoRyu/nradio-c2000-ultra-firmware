@@ -1223,7 +1223,7 @@ ui.modem();ui.gw();ui.dev();
 window._chart=new TrafficChart('traffic-canvas');
 initWind();
 loadScrStatus();
-setInterval(()=>{ui.gw();ui.dev();},2000);
+setInterval(()=>{if(!document.hidden){ui.gw();ui.dev();}},2000);
 /* 蜂窝信息单独放慢到 4 秒,且页面切走时不轮询:每次 info 都要抢 ttyUSB1,
    打太勤反而读不到东西(就是"有信号却显示未连接"的来源),回到页面立刻补一次 */
 setInterval(()=>{if(!document.hidden)ui.modem();},4000);

@@ -393,11 +393,16 @@ proc_age() {
 # (wrapper 里等锁的那个子进程)。看门狗上限是 20 秒,活过 40 秒的按定义就是漏网的。
 # 而且只收命令行里那个串口属于当前 5700 槽位的 —— 别人的模组一概不碰。
 reap_stuck_at() {
-	local slot="$1" p pid cmd a0 dev age killed=0
+	local slot="$1" p pid comm cmd a0 dev age killed=0
 
 	for p in /proc/[0-9]*; do
 		pid="${p#/proc/}"
 		[ "$pid" = "$$" ] && continue
+
+		# /proc/comm is read by ash itself. Only the two eligible executables
+		# need cmdline decoding; avoid spawning tr/head for every host task.
+		IFS= read -r comm < "$p/comm" 2>/dev/null || continue
+		case "$comm" in tom_modem.real|flock|busybox) ;; *) continue ;; esac
 
 		cmd="$(tr '\0' ' ' 2>/dev/null < "$p/cmdline")" || continue
 		cmd="${cmd% }"

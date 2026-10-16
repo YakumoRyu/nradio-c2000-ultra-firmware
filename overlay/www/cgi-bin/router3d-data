@@ -70,7 +70,13 @@ is_num "$ST_U" || ST_U=0
 # 用 ARP 完成态(flag 0x2)按 MAC 去重,而非 DHCP 租约行数
 # (租约会残留离线设备;同一主机多 IP 也应算 1 台)。
 LANDEV=$(uci -q get network.lan.device); [ -n "$LANDEV" ] || LANDEV=br-lan
-PCDNDEV=$(ubus call network.interface.pcdn1 status 2>/dev/null | jsonfilter -e '@.l3_device')
+PCDNDEV=""
+if uci -q get network.pcdn1 >/dev/null 2>&1; then
+    PCDNSTATUS=$(ubus call network.interface.pcdn1 status 2>/dev/null)
+    if [ -n "$PCDNSTATUS" ]; then
+        PCDNDEV=$(printf '%s' "$PCDNSTATUS" | jsonfilter -e '@.l3_device' 2>/dev/null)
+    fi
+fi
 # Isolated LANs may contain the same MAC; interface plus MAC identifies a client.
 CLIENTS=$(awk -v d="$LANDEV" -v p="$PCDNDEV" '($6==d || (p!="" && $6==p)) && $3=="0x2" && $4!="00:00:00:00:00:00"{print $6,$4}' /proc/net/arp 2>/dev/null | sort -u | grep -c .)
 is_num "$CLIENTS" || CLIENTS=0

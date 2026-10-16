@@ -239,32 +239,28 @@ local function get_wifi_ssid_uci()
 end
 
 local function get_cpu_usage()
-    local proc1 = io.open("/proc/stat", "r")
-    local cpu_line1 = proc1:read("*l")
-    proc1:close()
+    return string.format("%.1f%%", require("luci.model.ultra_cpu_sample").percent())
+end
 
-    local user1, nice1, system1, idle1, iowait1, irq1, softirq1, steal1 =
-        cpu_line1:match("cpu%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
+local function devinfo_ubus(object, method)
+    local ok, data = pcall(require("luci.util").ubus, object, method, {})
+    return ok and type(data) == "table" and data or nil
+end
 
-    local total1 = user1 + nice1 + system1 + idle1 + iowait1 + irq1 + softirq1 + steal1
-
-    nixio.nanosleep(1) -- 等 1 秒再采样第二次
-
-    local proc2 = io.open("/proc/stat", "r")
-    local cpu_line2 = proc2:read("*l")
-    proc2:close()
-
-    local user2, nice2, system2, idle2, iowait2, irq2, softirq2, steal2 =
-        cpu_line2:match("cpu%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
-
-    local total2 = user2 + nice2 + system2 + idle2 + iowait2 + irq2 + softirq2 + steal2
-
-    local total_diff = total2 - total1
-    local idle_diff  = idle2 - idle1
-
-    local usage = (total_diff - idle_diff) / total_diff * 100
-
-    return string.format("%.1f%%", usage)
+local function devinfo_default_route()
+    local file = io.open("/proc/net/route", "r")
+    if not file then return "", "" end
+    local device, gateway, best = "", "", math.huge
+    for line in file:lines() do
+        local dev,dst,gw,flags,metric=line:match("^(%S+)%s+(%x+)%s+(%x+)%s+(%x+)%s+%d+%s+%d+%s+(%d+)")
+        if dst == "00000000" and (tonumber(flags,16) or 0)%2 == 1 and tonumber(metric)<best then
+            device,best=dev,tonumber(metric)
+            local n=tonumber(gw,16) or 0
+            gateway=string.format("%d.%d.%d.%d", n%256, math.floor(n/256)%256, math.floor(n/65536)%256, math.floor(n/16777216)%256)
+        end
+    end
+    file:close()
+    return device,gateway
 end
 
 
@@ -275,14 +271,11 @@ function action_devinfo()
     local json = require "luci.jsonc"
     local uci = require "luci.model.uci".cursor()
 
-    local sys_h = io.popen("ubus call system info 2>/dev/null")
-    local sys_json = sys_h:read("*a") or ""
-    sys_h:close()
-    local sysinfo = json.parse(sys_json)
+    local sysinfo = devinfo_ubus("system", "info")
 
     local boardinfo_path = "/etc/board.json"
     if nixio.fs.access(boardinfo_path) then
-        local board_data = json.parse(fs.readfile(boardinfo_path) or "{}")
+        local board_data = json.parse(fs.readfile(boardinfo_path) or "{}") or {}
         rv["设备型号"] = board_data.model or board_data.board_name or "未知"
     else
         local cpuh = io.popen("cat /proc/device-tree/model 2>/dev/null")
@@ -291,9 +284,7 @@ function action_devinfo()
         rv["设备型号"] = model:gsub("%s+$", "") ~= "" and model:gsub("%s+$", "") or "未知"
     end
 
-    local hn = io.popen("uci get system.@system[0].hostname 2>/dev/null")
-    rv["主机名"] = (hn:read("*a") or ""):gsub("%s+$", "")
-    hn:close()
+    rv["主机名"] = uci:get_first("system", "system", "hostname") or ""
     if rv["主机名"] == "" then rv["主机名"] = "OpenWrt" end
 
     rv["固件版本"] = "未知"
@@ -321,9 +312,7 @@ function action_devinfo()
         else rv["设备温度"] = "未知" end
     else rv["设备温度"] = "未知" end
 
-    local kfile = io.popen("uname -r 2>/dev/null")
-    rv["内核版本"] = (kfile:read("*a") or ""):gsub("%s+$", "")
-    kfile:close()
+    rv["内核版本"] = (fs.readfile("/proc/sys/kernel/osrelease") or ""):gsub("%s+$", "")
 
     rv["CPU占用"] = get_cpu_usage()
     local cpucount, cpumodel = 0, ""
@@ -372,10 +361,11 @@ function action_devinfo()
     -- so key on the MAC, require the complete bit (0x2) in Flags, and accept
     -- only the LAN bridge.
     local lan_dev = uci:get("network", "lan", "device") or "br-lan"
-    local pcdn_h = io.popen("ubus call network.interface.pcdn1 status 2>/dev/null")
-    local pcdn_status = pcdn_h and json.parse(pcdn_h:read("*a") or "")
-    if pcdn_h then pcdn_h:close() end
-    local pcdn_dev = pcdn_status and pcdn_status.l3_device
+    local dump = devinfo_ubus("network.interface", "dump") or {}
+    local pcdn_dev
+    for _, iface in ipairs(dump.interface or {}) do
+        if iface.interface == "pcdn1" then pcdn_dev = iface.l3_device end
+    end
 
 
     local seen, count = {}, 0
@@ -403,14 +393,9 @@ function action_devinfo()
     -- 未连接 even when the router was online through it. Strategy: take the
     -- default-route egress device, then find the logical interface whose
     -- l3_device matches it. Fall back to "wan" if there is no default route.
-    local def_h = io.popen("ip route show default 2>/dev/null | awk '{print $5; exit}'")
-    local def_dev = (def_h:read("*a") or ""):gsub("%s+$", "")
-    def_h:close()
+    local def_dev, def_gateway = devinfo_default_route()
 
     local wan_ifname = "wan"
-    local dump_h = io.popen("ubus call network.interface dump 2>/dev/null")
-    local dump = json.parse(dump_h:read("*a") or "")
-    dump_h:close()
     if dump and dump.interface then
         local best
         for _, iface in ipairs(dump.interface) do
@@ -427,9 +412,10 @@ function action_devinfo()
         if best then wan_ifname = best end
     end
 
-    local wan_h = io.popen("ubus call network.interface." .. wan_ifname .. " status 2>/dev/null")
-    local wan_data = json.parse(wan_h:read("*a") or "")
-    wan_h:close()
+    local wan_data
+    for _, iface in ipairs(dump.interface or {}) do
+        if iface.interface == wan_ifname then wan_data = iface; break end
+    end
     if wan_data then
         rv["WAN状态"] = wan_data.up and "已连接" or "未连接"
         rv["WAN协议"] = wan_data.proto or "未知"
@@ -447,14 +433,10 @@ function action_devinfo()
         end
     else rv["WAN状态"] = "未知" end
 
-    local gw_h = io.popen("ip route show default 2>/dev/null | awk '{print $3}'")
-    rv["默认网关"] = (gw_h:read("*a") or ""):gsub("%s+$", "")
-    gw_h:close()
+    rv["默认网关"] = def_gateway
     if rv["默认网关"] == "" then rv["默认网关"] = "未知" end
 
-    local lan_h = io.popen("uci get network.lan.ipaddr 2>/dev/null")
-    rv["LAN_IP"] = (lan_h:read("*a") or ""):gsub("%s+$", "")
-    lan_h:close()
+    rv["LAN_IP"] = uci:get("network", "lan", "ipaddr") or ""
     if rv["LAN_IP"] == "" then rv["LAN_IP"] = "192.168.88.1" end
 
     -- Pick the real upstream egress device from the default route. This auto-
@@ -462,9 +444,7 @@ function action_devinfo()
     -- whose logical interface is NOT named "wan" — so the old hardcoded "wan"
     -- lookup never read it and the traffic chart stayed flat. Fall back to the
     -- ubus WAN device, then to br-lan (LAN side) if there is no default route.
-    local egress_h = io.popen("ip route show default 2>/dev/null | awk '{print $5; exit}'")
-    local egress_dev = (egress_h:read("*a") or ""):gsub("%s+$", "")
-    egress_h:close()
+    local egress_dev = def_dev
 
     local wan_dev, lan_fallback
     if egress_dev ~= "" then
@@ -502,10 +482,14 @@ function action_devinfo()
     end
 
     local fan_pwm = "0"
-    local fan_file = io.popen("cat $(ls /sys/devices/platform/pwm-fan/hwmon/hwmon*/pwm1 2>/dev/null|head -1) 2>/dev/null </dev/null")
-    if fan_file then fan_pwm = fan_file:read("*a"):gsub("%s+$", ""); fan_file:close() end
+    local pwm_paths = fs.glob("/sys/devices/platform/pwm-fan/hwmon/hwmon*/pwm1")
+    if pwm_paths then
+        for path in pwm_paths do
+            fan_pwm=(fs.readfile(path) or "0"):gsub("%s+$", "");break
+        end
+    end
     rv["风扇PWM"] = fan_pwm
-    rv["风扇转速百分比"] = tostring(math.floor(tonumber(fan_pwm or "0") / 255 * 100))
+    rv["风扇转速百分比"] = tostring(math.floor((tonumber(fan_pwm) or 0) / 255 * 100))
     local fmf = io.open("/etc/fanvall", "r")
     if fmf then
         local fm = fmf:read("*a"):gsub("%s+$", ""); fmf:close()
