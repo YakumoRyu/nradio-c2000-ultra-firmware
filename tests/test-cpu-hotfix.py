@@ -1,9 +1,9 @@
 """Exercise the production CPU installer against an isolated filesystem."""
-import importlib.util,tempfile,unittest
+import importlib.util,os,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 R=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('cpu_hotfix',R/'scripts/ultra-cpu-hotfix.py')
+spec=importlib.util.spec_from_file_location('cpu_hotfix',R/os.environ.get('ULTRA_HOTFIX_SCRIPT','scripts/ultra-cpu-hotfix.py'))
 h=importlib.util.module_from_spec(spec);spec.loader.exec_module(h)
 
 class CPUInstaller(unittest.TestCase):

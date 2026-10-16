@@ -1,0 +1,28 @@
+{
+  "release": "ultra-25.12-20261016-r6",
+  "format": "sysupgrade",
+  "model": "NRadio-C2000MAX-Ultra",
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "wifi": "MediaTek proprietary 8.3.1.2",
+  "webui": "3.0.2-r2",
+  "image_filename": "ultra-25.12-20261016-r6-nradio-c2000ultra-sysupgrade.bin",
+  "image_bytes": 215983327,
+  "optional_repository_bytes": 151015069,
+  "image_checks": 114,
+  "userspace_checks": 19,
+  "privacy_files_scanned": 7018,
+  "private_value_hits": 0,
+  "matching_optional_repository_verified": true,
+  "all_changes_in_ROM": true,
+  "original_login_preserved": true,
+  "whole_image_flashed": false,
+  "whole_image_hardware_boot_verified": false,
+  "factory_reset_executed": false,
+  "same_updates_live_installed_and_verified": true,
+  "passed": true,
+  "pending_validation": [
+    "Whole-image hardware boot and factory reset",
+    "Incident capture for reported multi-minute web/admin slowdowns"
+  ]
+}

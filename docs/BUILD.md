@@ -41,4 +41,6 @@ node tests/test-v302-frontend.cjs
 
 CPU维护更新的回归使用`python3 tests/test-usb-watchdog.py`、`lua5.1 tests/test-cpu-sample.lua`和`python3 tests/test-cpu-hotfix.py`。CPU安装器为`scripts/ultra-cpu-hotfix.py`，发布归档包含5个目标文件与校验清单，完整固件通过`overlay`集成相同文件。
 
+累计维护包使用`scripts/ultra-maintenance-hotfix.py`，当前包含8个目标文件，并记录r4/r5两基线的原始校验值。安装器回归执行`ULTRA_HOTFIX_SCRIPT=scripts/ultra-maintenance-hotfix.py python3 tests/test-cpu-hotfix.py`；归档还应分别对两种基线验证安装、重复安装和回退。
+
 网口、AT字段和显示升级工具的回归分别为`tests/test-ultra-ports.py`、`tests/test-modem-fields.py`、`tests/test-modem-fields.lua`及`tests/test-ui-hotfix.py`。Lua用5.1运行；网口事务测试可通过`UCI_RUNNER`指定实际目标UCI的JSON参数列表，其余协议测试独立执行。

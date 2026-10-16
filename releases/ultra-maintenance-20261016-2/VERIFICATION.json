@@ -1,0 +1,57 @@
+{
+  "release": "ultra-maintenance-20261016-2",
+  "format": "configuration-preserving cumulative maintenance archive",
+  "version": "20261016-r2",
+  "payload_files": 8,
+  "supported_baselines": [
+    "r4",
+    "r5"
+  ],
+  "installed_fixes_on_live_router": true,
+  "final_archive_noop_on_live_router": true,
+  "router_rebooted": false,
+  "isolated_archive_install_and_rollback": {
+    "56791c1:files_changed": true,
+    "56791c1:all_target_bytes": true,
+    "56791c1:second_install_no_changes": true,
+    "56791c1:rollback": true,
+    "56791c1:originals_restored": true,
+    "9614751:files_changed": true,
+    "9614751:all_target_bytes": true,
+    "9614751:second_install_no_changes": true,
+    "9614751:rollback": true,
+    "9614751:originals_restored": true
+  },
+  "private_configuration_included": false,
+  "checks": {
+    "source_matches_live": true,
+    "final_archive_no_changes": true,
+    "same_boot": true,
+    "critical_services_running": true,
+    "cellular_IPv4_IPv6_up": true,
+    "AT_owner_single": true,
+    "media_api_healthy": true,
+    "carrier_browser_verified": true
+  },
+  "carrier_browser_checks": {
+    "404_reproduced_before": true,
+    "asset_HTTP200_now": true,
+    "all_four_carriers_decode": true,
+    "desktop_image_visible": true,
+    "mobile_image_visible": true,
+    "light_theme_desktop_and_mobile": true,
+    "no_page_JS_errors": true,
+    "missing_image_hidden": true,
+    "missing_image_only_requested_once": true,
+    "operator_preserved_on_failure": true,
+    "successful_reload_recovers": true,
+    "source_and_live_match": true,
+    "build_inputs_synchronized": true,
+    "same_boot": true,
+    "no_services_restarted": true
+  },
+  "passed": true,
+  "pending_validation": [
+    "Incident capture for reported multi-minute web/admin slowdowns"
+  ]
+}
