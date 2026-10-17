@@ -1,0 +1,117 @@
+--- a/wlan_hwifi/bus/mtk_pci_dma.c
++++ b/wlan_hwifi/bus/mtk_pci_dma.c
+@@ -1488,6 +1488,26 @@
+ 	return 0;
+ }
+ 
++/* Descriptor faults leave the RX head unchanged. Ask the existing firmware
++ * SER manager to reset DMA instead of retrying the same corrupt entry forever.
++ * The callback only queues work and is explicitly safe from NAPI context.
++ */
++static int
++pci_dma_rx_desc_fault(struct pci_trans *trans, struct pci_queue *q, u32 idx)
++{
++	static DEFINE_RATELIMIT_STATE(recovery_rs, 30 * HZ, 1);
++	struct mtk_hw_dev *dev = to_hw_dev(trans);
++
++	if (__ratelimit(&recovery_rs)) {
++		dev_err(to_device(trans),
++			"RX descriptor fault on %s idx=%u; requesting firmware DMA recovery\n",
++			q->q_info, idx);
++		mtk_bus_rx_ser_event(dev, dev->chip_drv->device_id,
++			HW_SER_LV_10_0, 0, dev->sys_idx.idx);
++	}
++	return -EINVAL;
++}
++
+ static int
+ pci_dma_get_data_buf_by_copy(struct pci_trans *trans,
+ 	struct pci_queue *q, u32 idx, struct mtk_bus_rx_info *rx_info)
+@@ -1503,18 +1523,14 @@
+ 
+ 	pci_dma_rxdmad_parser(trans, rq, desc, rx_info);
+ 
++	/* A zero/stale DMA address must never be returned to hardware or copied. */
++	if (unlikely(!rx_info->sdp0))
++		return pci_dma_rx_desc_fault(trans, q, idx);
++
+ 	ret = mtk_rx_tk_entry_find(to_rx_tk_mgmt(trans), rx_info->id,
+ 				   &rx_info->pkt, &pkt_va, &pkt_pa);
+-	if (ret)
+-		return ret;
+-
+-	new_dma_buf.alloc_size = dma_buf->alloc_size;
+-	new_dma_buf.alloc_va = NULL;
+-	new_dma_buf.alloc_pa = 0;
+-	new_pkt = pci_dma_rx_pkt_alloc(to_device(trans), rq, &new_dma_buf, false);
+-
+-	if (new_pkt == NULL)
+-		return -ENOMEM;
++	if (ret || unlikely(!rx_info->pkt || !pkt_va))
++		return pci_dma_rx_desc_fault(trans, q, idx);
+ 
+ 	offset = SKB_HEADROOM_RSV - (pkt_va - rx_info->pkt);
+ 
+@@ -1522,7 +1538,7 @@
+ 		dev_err_once(to_device(trans),
+ 			"%s(): idx = %u, tkid = %u, offset = %d should not negative\n",
+ 			__func__, idx, rx_info->id, offset);
+-		goto err;
++		return pci_dma_rx_desc_fault(trans, q, idx);
+ 	}
+ 
+ 	if (unlikely(rx_info->sdp0 != pkt_pa)) {
+@@ -1532,8 +1548,15 @@
+ 		dev_err_once(to_device(trans),
+ 			"%s(): RXDMAD DW0: 0x%08x DW1: 0x%08x DW2: 0x%08x DW3: 0x%08x\n",
+ 			__func__, desc->dw0, desc->dw1, desc->dw2, desc->dw3);
+-		goto err;
+-	}
++		return pci_dma_rx_desc_fault(trans, q, idx);
++	}
++
++	new_dma_buf.alloc_size = dma_buf->alloc_size;
++	new_dma_buf.alloc_va = NULL;
++	new_dma_buf.alloc_pa = 0;
++	new_pkt = pci_dma_rx_pkt_alloc(to_device(trans), rq, &new_dma_buf, false);
++	if (new_pkt == NULL)
++		return -ENOMEM;
+ 
+ 	dma_sync_single_for_cpu(to_device(trans), pkt_pa,
+ 		dma_buf->alloc_size, DMA_FROM_DEVICE);
+@@ -1550,9 +1573,6 @@
+ 	fill_rxd(cb, rx_info->id, rq->magic_cnt);
+ 
+ 	return 0;
+-err:
+-	put_page(virt_to_head_page(new_pkt));
+-	return -EINVAL;
+ }
+ 
+ 
+@@ -1593,19 +1613,21 @@
+ 	struct pci_rx_queue *rq = (struct pci_rx_queue *)q;
+ 
+ 	if (flush) {
+-		desc->dw1 |= cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT));
++		WRITE_ONCE(desc->dw1, READ_ONCE(desc->dw1) | cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT)));
+ 	} else if (rq->get_pkt_method == GET_PKT_IO) {
+ 		if (idx == q->tail)
+ 			return -EINVAL;
+ 	} else if (test_bit(PCI_FLAG_WHNAT_TX, &trans->flags) &&
+ 			q->q_attr == Q_RX_EVENT_TX_FREE_DONE) {
+-		if (!(desc->dw1 & cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT))) ||
+-			!(desc->dw1 & cpu_to_le32(BIT(RXDMAD_M_DONE_SHIFT))))
++		if (!(READ_ONCE(desc->dw1) & cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT))) ||
++			!(READ_ONCE(desc->dw1) & cpu_to_le32(BIT(RXDMAD_M_DONE_SHIFT))))
+ 			return -EINVAL;
+-	} else if (!(desc->dw1 & cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT)))) {
++	} else if (!(READ_ONCE(desc->dw1) & cpu_to_le32(BIT(RXDMAD_DDONE_SHIFT)))) {
+ 		return -EINVAL;
+ 	}
+ 
++	/* Coherent DMA still needs ordering after device ownership changes. */
++	dma_rmb();
+ 	return pci_dma_get_buf(trans, q, idx, rx_info);
+ }
+ 

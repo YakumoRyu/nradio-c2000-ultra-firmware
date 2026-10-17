@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""Install the reviewed CPU, dashboard and carrier-logo fixes with checked rollback."""
+"""Install the reviewed wireless DMA recovery and cumulative maintenance fixes with checked rollback."""
 import argparse,fcntl,hashlib,json,os,subprocess,tempfile
 from pathlib import Path
 
-VERSION='20261016-r2'
+VERSION='20261017-r1'
 BACKUP='overlay/ultra-hotfix-backups/maintenance-'+VERSION
 
 
@@ -71,6 +71,7 @@ def main():
     a=p.parse_args();root=Path(a.root).resolve()
     assert (root/'tmp/sysinfo/board_name').read_text().strip()=='NRadio-C2000MAX-Ultra'
     assert '25.12' in (root/'etc/openwrt_release').read_text()
+    if root==Path('/') and os.uname().release!='6.12.103':raise ValueError('需要Linux6.12.103')
     lock=root/'var/run/ultra-maintenance-hotfix.lock';lock.parent.mkdir(parents=True,exist_ok=True)
     with lock.open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -79,6 +80,7 @@ def main():
         # LuCI recompiles its menu cache on the next request; no service restarts.
         for item in Path('/tmp').glob('luci-indexcache*'):
             if item.is_file():item.unlink()
+    r['reboot_required']=True
     print(json.dumps(r))
 
 if __name__=='__main__':

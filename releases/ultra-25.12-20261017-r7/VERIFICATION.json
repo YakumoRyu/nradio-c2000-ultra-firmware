@@ -1,0 +1,59 @@
+{
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "wifi": "MediaTek proprietary 8.3.1.2",
+  "RX_DMA_patch": "954-recover-invalid-rx-dma-descriptors.patch",
+  "module_sha256": "3618559dc5ff3275611dc5c307b1275da9203dc745a847d7f816f9cab7f3ad1e",
+  "module_bytes": 47464,
+  "C_function_test_cases": 21,
+  "same_driver_live_loaded_and_verified": true,
+  "user_confirmed_web_admin_and_wifi_normal": true,
+  "observation": {
+    "passed": true,
+    "seconds": 180.2,
+    "checks": {
+      "same_boot": true,
+      "both_radios_stayed_up": true,
+      "no_DMA_or_kernel_faults": true,
+      "no_sustained_CPU_saturation": true
+    },
+    "cpu_mean": {
+      "cpu": 12.707067227635779,
+      "cpu0": 12.029369318134465,
+      "cpu1": 13.39003100895968,
+      "cpu2": 12.33684362394147,
+      "cpu3": 12.894097104817753
+    },
+    "cpu_peak": {
+      "cpu": 33.91695847923962,
+      "cpu0": 44.87427466150871,
+      "cpu1": 43.72549019607843,
+      "cpu2": 65.11627906976744,
+      "cpu3": 50.679611650485434
+    },
+    "min_mem_available_mib": 218.3,
+    "kernel_errors": []
+  },
+  "passed": true,
+  "release": "ultra-25.12-20261017-r7",
+  "format": "sysupgrade",
+  "model": "NRadio-C2000MAX-Ultra",
+  "webui": "3.0.2-r2",
+  "image_filename": "ultra-25.12-20261017-r7-nradio-c2000ultra-sysupgrade.bin",
+  "image_bytes": 215983327,
+  "optional_repository_bytes": 151015064,
+  "image_checks": 114,
+  "userspace_checks": 19,
+  "privacy_files_scanned": 7018,
+  "private_value_hits": 0,
+  "matching_optional_repository_verified": true,
+  "all_changes_in_ROM": true,
+  "original_login_preserved": true,
+  "kernel_byte_identical_to_r6": true,
+  "whole_image_flashed": false,
+  "whole_image_hardware_boot_verified": false,
+  "factory_reset_executed": false,
+  "pending_validation": [
+    "Whole-image hardware boot and factory reset"
+  ]
+}
