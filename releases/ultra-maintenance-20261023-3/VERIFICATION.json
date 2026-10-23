@@ -1,0 +1,147 @@
+{
+  "passed": true,
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "wifi": "MediaTek proprietary 8.3.1.2",
+  "media_guard_tests": 21,
+  "runtime": {
+    "checks": {
+      "real_library_API": true,
+      "LAN_and_public_real_video_206": true,
+      "three_playback_services_running": true,
+      "Emby_restarted_by_guard": true,
+      "old_bug_reproduced_fixed_case_passed": true,
+      "monitor_same_boot": true,
+      "all_endpoint_samples_200": true,
+      "fresh_protection_samples": true,
+      "final_candidate_live_samples_passed": true,
+      "final_source_matches_live": true,
+      "archive_noop_and_personal_configuration_preserved": true,
+      "background_catchup_analysis_preserved": true,
+      "user_confirmed_Hills_Lite_loading_and_playback": true
+    },
+    "monitor_seconds": 900.0,
+    "samples": 61,
+    "final_candidate_additional_monitor_seconds": 120.0,
+    "resource_statistics": {
+      "cpu_busy_percent": {
+        "minimum": 24.97,
+        "median": 37.51,
+        "maximum": 57.16
+      },
+      "available_mb": {
+        "minimum": 158.6,
+        "median": 183.25,
+        "maximum": 262.99
+      },
+      "iowait_percent": {
+        "minimum": 0.0,
+        "median": 0.24,
+        "maximum": 29.06
+      },
+      "guard_age": {
+        "minimum": 0.1,
+        "median": 2.5,
+        "maximum": 5.1
+      }
+    },
+    "HTTP_latency": {
+      "router": {
+        "median_seconds": 0.004,
+        "maximum_seconds": 0.101,
+        "all_200": true
+      },
+      "emby": {
+        "median_seconds": 0.013,
+        "maximum_seconds": 0.468,
+        "all_200": true
+      },
+      "mediawarp": {
+        "median_seconds": 0.021,
+        "maximum_seconds": 2.138,
+        "all_200": true
+      }
+    },
+    "emby_soft_watermark_mib": 320,
+    "emby_hard_limit_mib": 384,
+    "manual_reboot_during_diagnosis": false,
+    "incident_trigger": "Docker stop timed out while container still reported running. The r9 recovery queue discarded that target before its delayed exit.",
+    "CPU_comparison_note": "Production traffic was active throughout; this is an availability observation, not a controlled CPU benchmark.",
+    "recovery_status": {
+      "emby_recovered": true,
+      "autofilm_running": false,
+      "autofilm_waiting_for_available_memory_mib": 224,
+      "all_services_recovered": false,
+      "original_monitor_passed": false,
+      "original_monitor_failed_condition": "AutoFilm remained suspended while available memory was below its recovery threshold."
+    },
+    "source_sha256": "9b8771bf2b4a1f7957ee4a56b0747c941573f5683ce47f6fe0efb72b4902ae78",
+    "user_playback_acceptance": "Hills Lite library loading and playback confirmed normal by user."
+  },
+  "private_configuration_included": false,
+  "release": "ultra-maintenance-20261023-3",
+  "format": "configuration-preserving cumulative maintenance archive",
+  "version": "20261023-r3",
+  "payload_files": 17,
+  "supported_baselines": [
+    "r4",
+    "r5",
+    "r6",
+    "r7",
+    "r8",
+    "r9"
+  ],
+  "final_archive_noop_on_live_router": true,
+  "same_boot_during_archive_check": true,
+  "installer_requests_reboot_only_on_driver_change": true,
+  "isolated_archive_install_and_rollback": {
+    "56791c1:changed_count": true,
+    "56791c1:reboot_only_if_driver_changed": true,
+    "56791c1:all_target_bytes": true,
+    "56791c1:idempotent": true,
+    "56791c1:rollback": true,
+    "56791c1:originals_restored": true,
+    "56791c1:personal_configuration_preserved": true,
+    "56791c1:unknown_source_rejected_before_mutation": true,
+    "9614751:changed_count": true,
+    "9614751:reboot_only_if_driver_changed": true,
+    "9614751:all_target_bytes": true,
+    "9614751:idempotent": true,
+    "9614751:rollback": true,
+    "9614751:originals_restored": true,
+    "9614751:personal_configuration_preserved": true,
+    "9614751:unknown_source_rejected_before_mutation": true,
+    "a10213a:changed_count": true,
+    "a10213a:reboot_only_if_driver_changed": true,
+    "a10213a:all_target_bytes": true,
+    "a10213a:idempotent": true,
+    "a10213a:rollback": true,
+    "a10213a:originals_restored": true,
+    "a10213a:personal_configuration_preserved": true,
+    "a10213a:unknown_source_rejected_before_mutation": true,
+    "d505f33:changed_count": true,
+    "d505f33:reboot_only_if_driver_changed": true,
+    "d505f33:all_target_bytes": true,
+    "d505f33:idempotent": true,
+    "d505f33:rollback": true,
+    "d505f33:originals_restored": true,
+    "d505f33:personal_configuration_preserved": true,
+    "d505f33:unknown_source_rejected_before_mutation": true,
+    "228e94b:changed_count": true,
+    "228e94b:reboot_only_if_driver_changed": true,
+    "228e94b:all_target_bytes": true,
+    "228e94b:idempotent": true,
+    "228e94b:rollback": true,
+    "228e94b:originals_restored": true,
+    "228e94b:personal_configuration_preserved": true,
+    "228e94b:unknown_source_rejected_before_mutation": true,
+    "d016923:changed_count": true,
+    "d016923:reboot_only_if_driver_changed": true,
+    "d016923:all_target_bytes": true,
+    "d016923:idempotent": true,
+    "d016923:rollback": true,
+    "d016923:originals_restored": true,
+    "d016923:personal_configuration_preserved": true,
+    "d016923:unknown_source_rejected_before_mutation": true
+  }
+}

@@ -10,6 +10,42 @@ def measured(available=280,cpu=68):
  return {'available_mb':available,'cpu_busy_percent':cpu,'iowait_percent':0,'swap_in_mb_per_second':0,'media_cpu_percent':0,'cpu_busy_per_core':{'cpu0':cpu},'softirq_per_core':{'cpu0':35},'max_core_busy_percent':cpu}
 
 class PlanTests(unittest.TestCase):
+ def test_r9_lost_stop_intent_reclaims_recorded_exited_service(self):
+  old={'stopped_by_guard':[],'last_action':{'action':'stop_media','result':'requested','containers':['emby']}}
+  fixed=g.recover_lost_stop_intent(old,{'emby':{'running':False,'source':'docker'}})
+  self.assertEqual(fixed['stopped_by_guard'],['emby']);self.assertEqual(fixed['service_phases']['emby'],'stopped')
+  self.assertEqual(old['stopped_by_guard'],[])
+ def test_r9_migration_does_not_reclaim_unknown_or_other_manual_stops(self):
+  old={'stopped_by_guard':[],'last_action':{'action':'stop_media','result':'requested','containers':['emby']}}
+  for row in ({'running':False,'source':'unknown'},{'running':True,'source':'docker'}):
+   self.assertEqual(g.recover_lost_stop_intent(old,{'emby':row})['stopped_by_guard'],[])
+  self.assertEqual(g.recover_lost_stop_intent(old,{'autofilm':{'running':False,'source':'docker'}})['stopped_by_guard'],[])
+ def test_completed_actions_do_not_create_recovery_ownership(self):
+  old={'stopped_by_guard':[],'last_action':{'action':'restart_media_stage','result':'completed','containers':['emby']}}
+  self.assertEqual(g.recover_lost_stop_intent(old,{'emby':{'running':False,'source':'docker'}})['stopped_by_guard'],[])
+ def test_delayed_stop_cannot_be_mistaken_for_recovery(self):
+  p=g.RecoveryPlan({'stopped_by_guard':['emby']},'boot',1000)
+  rows={n:{'running':True} for n in g.ALLOWED}
+  self.assertEqual(p.reconcile(['emby'],rows),['emby'])
+  self.assertEqual(p.phases['emby'],'stopping')
+  rows['emby']['running']=False
+  self.assertEqual(p.reconcile(['emby'],rows),['emby']);self.assertEqual(p.phases['emby'],'stopped')
+  rows['emby']['running']=True
+  self.assertEqual(p.reconcile(['emby'],rows),['emby'])
+  p.requested('emby',1100)
+  self.assertEqual(p.reconcile(['emby'],rows),[])
+ def test_restart_preserves_pending_stop_phase(self):
+  p=g.RecoveryPlan({'boot_id':'boot','stopped_by_guard':['emby'],'service_phases':{'emby':'stopping'}},'boot',1000)
+  self.assertEqual(p.reconcile(['emby'],{'emby':{'running':True}}),['emby'])
+  self.assertEqual(p.phases['emby'],'stopping')
+ def test_missing_process_during_Docker_timeout_is_not_confirmed_exit(self):
+  p=g.RecoveryPlan({'stopped_by_guard':['emby']},'boot',1000)
+  rows={'emby':{'running':False,'source':'unknown'}}
+  self.assertEqual(p.reconcile(['emby'],rows),['emby']);self.assertEqual(p.phases['emby'],'stopping')
+ def test_timed_out_start_remains_acknowledgeable_after_restart(self):
+  old={'boot_id':'boot','stopped_by_guard':['emby'],'service_phases':{'emby':'starting'},'last_action':{'action':'restart_media_stage','containers':['emby']}}
+  p=g.RecoveryPlan(old,'boot',1000)
+  self.assertEqual(p.reconcile(['emby'],{'emby':{'running':True}}),[])
  def test_docker_timeout_falls_back_to_live_cgroups(self):
   class Broken:
    def request(self,*args):raise TimeoutError()
@@ -59,20 +95,26 @@ class PlanTests(unittest.TestCase):
   self.assertEqual(g.PressureGate().observe(measured(60),0),'critical_memory')
 
 class LoopTests(unittest.TestCase):
- def run_loop(self,old=None,available=280,fail_stop=False,fail_start=False):
+ def run_loop(self,old=None,available=280,fail_stop=False,fail_start=False,delayed_stop=False,duration=500):
   with tempfile.TemporaryDirectory() as d:
-   status=Path(d)/'state.json';now=[1000];end=1500;started=[]
+   status=Path(d)/'state.json';now=[1000];end=1000+duration;started=[];stop_requests=[]
    running={n:True for n in g.ALLOWED}
    if old:
     status.write_text(json.dumps(old))
     for n in old['stopped_by_guard']:running[n]=False
-   def inspect():return {n:{'running':v,'pid':0,'id':'a'*64} for n,v in running.items()}
+   def inspect():
+    if delayed_stop and stop_requests and now[0]>=1100:
+     for n in stop_requests:running[n]=False
+     stop_requests.clear()
+    return {n:{'running':v,'pid':0,'id':'a'*64} for n,v in running.items()}
    def sleep(seconds):
     now[0]+=seconds
     if now[0]>=end:raise KeyboardInterrupt()
    def stop(names):
     nonlocal available
-    for n in names:running[n]=False
+    for n in names:
+     if delayed_stop:stop_requests.append(n)
+     else:running[n]=False
     available=280
     if fail_stop:raise subprocess.TimeoutExpired(['docker','stop'],30)
    def start(argv,**kw):
@@ -87,6 +129,11 @@ class LoopTests(unittest.TestCase):
   s,_,_=self.run_loop(available=60,fail_stop=True)
   self.assertEqual(s['stopped_by_guard'],['emby'])
   self.assertEqual(s['last_action']['result'],'requested')
+ def test_delayed_docker_stop_timeout_eventually_recovers_once(self):
+  s,started,running=self.run_loop(available=60,fail_stop=True,delayed_stop=True,duration=950)
+  self.assertEqual(started,['emby']);self.assertTrue(running['emby'])
+  self.assertEqual(s['stopped_by_guard'],[])
+  self.assertEqual(s['last_action']['action'],'restart_media_stage')
  def test_start_timeout_after_success_reconciles_without_retry(self):
   old={'boot_id':'boot','stopped_by_guard':['emby'],'last_stop_uptime':100}
   s,started,running=self.run_loop(old,fail_start=True)

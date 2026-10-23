@@ -46,7 +46,7 @@ def process_inspect(proc_root='/proc',cgroup_root='/sys/fs/cgroup'):
     if len(ident)==64 and all(c in '0123456789abcdef' for c in ident) and (Path(cgroup_root)/'docker'/ident/'cgroup.procs').exists():
      candidates[name].append({'id':ident,'pid':int(root.name),'running':True})
   except (OSError,UnicodeError):continue
- return {n:(rows[0] if len(rows)==1 else {'id':'','pid':0,'running':False}) for n,rows in candidates.items()}
+ return {n:(rows[0]|{'source':'process'} if len(rows)==1 else {'id':'','pid':0,'running':False,'source':'unknown'}) for n,rows in candidates.items()}
 
 def inspect():
  # A blocked container inspect must not freeze all memory/CPU protection.
@@ -57,7 +57,7 @@ def inspect():
    conn.request('GET','/containers/'+name+'/json');response=conn.getresponse()
    if response.status!=200:raise OSError('Docker inspect unavailable')
    row=json.loads(response.read())
-   result[name]={'id':row['Id'],'running':row['State']['Running'],'pid':row['State']['Pid']}
+   result[name]={'id':row['Id'],'running':row['State']['Running'],'pid':row['State']['Pid'],'source':'docker'}
   except (OSError,ValueError,KeyError,http.client.HTTPException):
    if fallback is None:fallback=process_inspect()
    result[name]=fallback[name]
@@ -175,6 +175,14 @@ def safe_to_resume(measured,name='emby'):
 class RecoveryPlan:
  def __init__(self,old,boot_id,now):
   self.attempts=[]
+  owned=[n for n in old.get('stopped_by_guard',[]) if n in ALLOWED]
+  phases=old.get('service_phases',{})
+  self.phases={n:phases.get(n,'stopping') for n in owned}
+  self.phases={n:(phase if phase in ('stopping','stopped','starting') else 'stopping') for n,phase in self.phases.items()}
+  last=old.get('last_action') or {}
+  if last.get('action')=='restart_media_stage':
+   for n in last.get('containers',[]):
+    if n in owned:self.phases[n]='starting'
   if old.get('boot_id')==boot_id:
    self.attempts=[v for v in old.get('recovery_attempts',[]) if isinstance(v,dict) and v.get('name') in ALLOWED and isinstance(v.get('uptime'),(int,float)) and 0<=now-v['uptime']<3600]
    # Preserve the hourly cooldown of the preceding guard version.
@@ -194,7 +202,18 @@ class RecoveryPlan:
   if self.attempts and now-max(v['uptime'] for v in self.attempts)<STAGE_SECONDS:return None
   return name
  def requested(self,name,now):
-  self.attempts.append({'name':name,'uptime':now});self.healthy_since=None
+  self.attempts.append({'name':name,'uptime':now});self.healthy_since=None;self.phases[name]='starting'
+ def stopping(self,names):
+  for name in names:self.phases[name]='stopping'
+ def reconcile(self,owned,containers):
+  pending=[]
+  for name in owned:
+   phase=self.phases.setdefault(name,'stopping')
+   if phase=='starting' and containers[name]['running']:
+    self.phases.pop(name,None);continue
+   if phase=='stopping' and not containers[name]['running'] and containers[name].get('source','docker')=='docker':self.phases[name]='stopped'
+   pending.append(name)
+  return pending
 
 def restore_guard_state(old,boot_id,now):
  if not isinstance(old,dict):return [],0,[],None
@@ -205,6 +224,20 @@ def restore_guard_state(old,boot_id,now):
   if isinstance(value,(int,float)) and 0<=value<=now:last_stop=value
   recoveries=[v for v in old.get('recovery_uptimes',[]) if isinstance(v,(int,float)) and 0<=now-v<3600]
  return stopped,last_stop,recoveries,old.get('last_action')
+
+def recover_lost_stop_intent(old,containers):
+ # r9 could clear ownership while a timed-out stop request was still pending.
+ # Reclaim only its recorded targets, with an authoritative Docker exit.
+ if not isinstance(old,dict):return {}
+ action=old.get('last_action') or {}
+ if action.get('action')!='stop_media' or action.get('result')!='requested':return old
+ owned=[n for n in old.get('stopped_by_guard',[]) if n in ALLOWED]
+ phases=dict(old.get('service_phases') or {})
+ for name in action.get('containers',[]):
+  row=containers.get(name,{})
+  if name in ALLOWED and name not in owned and row.get('source')=='docker' and row.get('running') is False:
+   owned.append(name);phases[name]='stopped'
+ return old|{'stopped_by_guard':owned,'service_phases':phases}
 
 
 def write(data):
@@ -222,8 +255,8 @@ def load_state():
 
 def persist_state(data):
  # Only ownership/actions change on TF storage; five-second measurements stay in tmpfs.
- keys=('boot_id','stopped_by_guard','last_stop_uptime','recovery_uptimes','recovery_attempts','last_action')
- state={k:data[k] for k in keys}
+ keys=('boot_id','stopped_by_guard','last_stop_uptime','recovery_uptimes','recovery_attempts','last_action','service_phases')
+ state={k:data.get(k,{}) if k=='service_phases' else data[k] for k in keys}
  try:
   with open(PERSIST) as f:
    if json.load(f)==state:return
@@ -235,6 +268,7 @@ def persist_state(data):
 def checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan):
  global persist_error_reported
  data={'epoch':time.time(),'boot_id':boot_id,'last_stop_uptime':last_stop,'recovery_uptimes':recoveries,'recovery_attempts':plan.attempts,'next_recovery':plan.candidate,'state':'media_suspended_for_routing' if stopped else 'protecting','measurements':measured,'stopped_by_guard':stopped,'last_action':last_action,'automatic_recoveries_last_hour':len(recoveries),'thresholds':{'critical_available_mb':64,'sustained_available_mb':128,'memory_duration_seconds':15,'sustained_iowait_percent':30,'swap_in_mb_per_second':2,'cpu_busy_percent':90,'cpu_duration_seconds':20,'resume_available_mb':RESUME_AVAILABLE_MB,'resume_cpu_busy_percent':80,'resume_stable_seconds':STABLE_SECONDS,'recovery_stage_seconds':STAGE_SECONDS}}
+ data['service_phases']={n:plan.phases.get(n,'stopping') for n in stopped}
  write(data)
  try:persist_state(data);persist_error_reported=False
  except OSError:
@@ -248,7 +282,7 @@ def stop(names):
 def run():
  gate=PressureGate();core_pressure=CorePressure();hotspot_reported=False
  with open('/proc/sys/kernel/random/boot_id') as f:boot_id=f.read().strip()
- old=load_state()
+ old=recover_lost_stop_intent(load_state(),inspect())
  stopped,last_stop,recoveries,last_action=restore_guard_state(old,boot_id,time.monotonic())
  plan=RecoveryPlan(old if isinstance(old,dict) else {},boot_id,time.monotonic())
  paths=[];high_paths=[];previous=None;last_path_check=0;last_error=None
@@ -271,26 +305,29 @@ def run():
     running=inspect()
     # Shed one service, then remeasure before touching the next service.
     order=('emby','autofilm') if reason=='critical_memory' else ('autofilm','emby')
-    targets=[n for n in order if running[n]['running']][:1]
-    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if running[n]['running']][:1]
+    targets=[n for n in order if running[n]['running'] and n not in stopped][:1]
+    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if running[n]['running'] and n not in stopped][:1]
     if targets:
      # Save ownership before Docker can time out after actually stopping a container.
      stopped=list(dict.fromkeys(stopped+targets));last_stop=now;plan.healthy_since=None;gate=PressureGate();last_action={'epoch':time.time(),'action':'stop_media','reason':reason,'containers':targets,'result':'requested'}
+     last_action['measurements']=measured;plan.stopping(targets)
      checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
      stop(targets)
      last_action['result']='completed'
      print('media-protection: stopped '+','.join(targets)+' for '+reason,flush=True)
    elif stopped:
-    # An operator or a timed-out Docker request may already have started it.
+    # A stop request can outlive its CLI timeout while Docker still reports
+    # Running=true. Only our own start intent can acknowledge recovery.
     running=inspect()
-    stopped=[n for n in stopped if not running[n]['running']]
-    name=plan.next(stopped,measured,now,last_stop)
+    stopped=plan.reconcile(stopped,running)
+    ready=[n for n in stopped if plan.phases.get(n)=='stopped']
+    name=plan.next(ready,measured,now,last_stop)
     if name:
      plan.requested(name,now);last_action={'epoch':time.time(),'action':'restart_media_stage','containers':[name],'result':'requested'}
      checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
      subprocess.run([DOCKER,'start',name],check=True,timeout=30,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
      if not inspect()[name]['running']:raise RuntimeError('Container did not become running')
-     stopped.remove(name);recoveries.append(now);last_path_check=0;previous=None
+     stopped.remove(name);plan.phases.pop(name,None);recoveries.append(now);last_path_check=0;previous=None
      last_action['result']='completed';print('media-protection: recovered '+name+' after stable routing headroom',flush=True)
    checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
    last_error=None

@@ -3,7 +3,7 @@
 import argparse,fcntl,hashlib,json,os,subprocess,tempfile
 from pathlib import Path
 
-VERSION='20261023-r2'
+VERSION='20261023-r3'
 BACKUP='overlay/ultra-hotfix-backups/maintenance-'+VERSION
 
 

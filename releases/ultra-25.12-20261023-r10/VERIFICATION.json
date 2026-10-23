@@ -1,0 +1,108 @@
+{
+  "passed": true,
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "wifi": "MediaTek proprietary 8.3.1.2",
+  "media_guard_tests": 21,
+  "runtime": {
+    "checks": {
+      "real_library_API": true,
+      "LAN_and_public_real_video_206": true,
+      "three_playback_services_running": true,
+      "Emby_restarted_by_guard": true,
+      "old_bug_reproduced_fixed_case_passed": true,
+      "monitor_same_boot": true,
+      "all_endpoint_samples_200": true,
+      "fresh_protection_samples": true,
+      "final_candidate_live_samples_passed": true,
+      "final_source_matches_live": true,
+      "archive_noop_and_personal_configuration_preserved": true,
+      "background_catchup_analysis_preserved": true,
+      "user_confirmed_Hills_Lite_loading_and_playback": true
+    },
+    "monitor_seconds": 900.0,
+    "samples": 61,
+    "final_candidate_additional_monitor_seconds": 120.0,
+    "resource_statistics": {
+      "cpu_busy_percent": {
+        "minimum": 24.97,
+        "median": 37.51,
+        "maximum": 57.16
+      },
+      "available_mb": {
+        "minimum": 158.6,
+        "median": 183.25,
+        "maximum": 262.99
+      },
+      "iowait_percent": {
+        "minimum": 0.0,
+        "median": 0.24,
+        "maximum": 29.06
+      },
+      "guard_age": {
+        "minimum": 0.1,
+        "median": 2.5,
+        "maximum": 5.1
+      }
+    },
+    "HTTP_latency": {
+      "router": {
+        "median_seconds": 0.004,
+        "maximum_seconds": 0.101,
+        "all_200": true
+      },
+      "emby": {
+        "median_seconds": 0.013,
+        "maximum_seconds": 0.468,
+        "all_200": true
+      },
+      "mediawarp": {
+        "median_seconds": 0.021,
+        "maximum_seconds": 2.138,
+        "all_200": true
+      }
+    },
+    "emby_soft_watermark_mib": 320,
+    "emby_hard_limit_mib": 384,
+    "manual_reboot_during_diagnosis": false,
+    "incident_trigger": "Docker stop timed out while container still reported running. The r9 recovery queue discarded that target before its delayed exit.",
+    "CPU_comparison_note": "Production traffic was active throughout; this is an availability observation, not a controlled CPU benchmark.",
+    "recovery_status": {
+      "emby_recovered": true,
+      "autofilm_running": false,
+      "autofilm_waiting_for_available_memory_mib": 224,
+      "all_services_recovered": false,
+      "original_monitor_passed": false,
+      "original_monitor_failed_condition": "AutoFilm remained suspended while available memory was below its recovery threshold."
+    },
+    "source_sha256": "9b8771bf2b4a1f7957ee4a56b0747c941573f5683ce47f6fe0efb72b4902ae78",
+    "user_playback_acceptance": "Hills Lite library loading and playback confirmed normal by user."
+  },
+  "private_configuration_included": false,
+  "release": "ultra-25.12-20261023-r10",
+  "format": "sysupgrade",
+  "model": "NRadio-C2000MAX-Ultra",
+  "webui": "3.0.2-r2",
+  "image_filename": "ultra-25.12-20261023-r10-nradio-c2000ultra-sysupgrade.bin",
+  "image_bytes": 215983327,
+  "optional_repository_bytes": 151014688,
+  "image_checks": 122,
+  "userspace_checks": 19,
+  "privacy_files_scanned": 7019,
+  "private_value_hits": 0,
+  "matching_optional_repository_verified": true,
+  "changed_paths_from_r9": [
+    "etc/ultra-release",
+    "usr/lib/codex-media/media_protection.py",
+    "usr/sbin/ultra-package-feeds"
+  ],
+  "all_changes_in_ROM": true,
+  "original_login_preserved": true,
+  "kernel_byte_identical_to_r9": true,
+  "whole_image_flashed": false,
+  "whole_image_hardware_boot_verified": false,
+  "factory_reset_executed": false,
+  "pending_validation": [
+    "Whole-image boot and factory reset"
+  ]
+}

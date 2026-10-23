@@ -8,22 +8,22 @@
 | 内核 | Linux6.12.103 |
 | 无线 | 联发科闭源驱动8.3.1.2 |
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r2 |
-| 完整固件 | ultra-25.12-20261023-r9 |
-| 升级包 | ultra-maintenance-20261023-2 |
+| 完整固件 | ultra-25.12-20261023-r10 |
+| 升级包 | ultra-maintenance-20261023-3 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261023-2) | 在r4/r5/r6/r7/r8基线上安装17文件累计修复，保留配置。r8仅更新两个媒体保护文件。 |
-| [完整r9固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261023-r9) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261023-3) | 在r4/r5/r6/r7/r8/r9基线上安装17文件累计修复，保留配置。r9只更新媒体保护程序。 |
+| [完整r10固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261023-r10) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次修复媒体保护查询超时、停服后恢复和重启状态保存，并调整Emby内存回收水位。实机媒体库、内外网视频分段读取及3分钟持续监测通过；完整r9为整镜像待实机启动的预发布版本。
+本次修复Docker停止超时后，把延迟退出的容器误判为已恢复的问题。保护程序区分停止与启动阶段，实机通过恢复队列启动Emby；完整r10为整镜像待实机启动的预发布版本。业务和资源验收记录见Release的VERIFICATION.json。
 
 完整固件约206MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261023-2/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261023-3/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)
