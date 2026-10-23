@@ -20,7 +20,7 @@ def main(manifest):
    for key in ('base_asset','target_asset'):assert Path(item[key]).name==item[key]
    for key in ('base_sha256','target_sha256','delta_sha256'):assert re.fullmatch('[0-9a-f]{64}',item[key])
    delta=(root/item['delta']).resolve();assert delta.is_relative_to(root) and digest(delta)==item['delta_sha256']
-   release=next(r for r in releases if r['tag_name']==item['target_tag']);assert release['draft']
+   release=next(r for r in releases if r['tag_name']==item['target_tag']);assert release['draft'] or release['prerelease']
    existing=next((a for a in release['assets'] if a['name']==item['target_asset']),None)
    expected='sha256:'+item['target_sha256']
    if existing:
