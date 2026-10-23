@@ -1,0 +1,190 @@
+--- a/application/qmodem/files/usr/share/qmodem/vendor/huawei.sh
++++ b/application/qmodem/files/usr/share/qmodem/vendor/huawei.sh
+@@ -238,11 +238,8 @@
+     fi
+ 
+     #SIM Number（SIM卡号码，手机号）
+-    sim_number=$(cmd_cnum "$at_port" | grep "+CNUM: " | awk -F'"' '{print $2}')
+-    [ -z "$sim_number" ] && {
+-      sim_number=$(cmd_cnum "$at_port" | grep "+CNUM: " | awk -F'"' '{print $4}')
+-    }
+-    
++    sim_number=$(cmd_cnum "$at_port" | awk -v mode=cnum -f /usr/share/qmodem/modem_fields.awk)
++
+     #IMSI（国际移动用户识别码）
+     imsi=$(cmd_cimi "$at_port" | sed -n '2p' | sed 's/\r//g')
+     
+@@ -459,6 +456,8 @@
+                     lte_rsrp=$(echo "$response" | awk -F',' '{print $8}')
+                     lte_rsrq=$(echo "$response" | awk -F',' '{print $9}')
+                     lte_rxlev=$(echo "$response" | awk -F',' '{print $10}' | sed 's/\r//g')
++                    # LTE MONSC omits SINR; read the Huawei HCSQ SINR field.
++                    lte_sinr=$(cmd_hcsq_query "$at_port" | awk -v mode=lte_sinr -f /usr/share/qmodem/modem_fields.awk)
+                 ;;
+                 "WCDMA"|"TD-SCDMA"|"UMTS")
+                     network_mode="WCDMA Mode"
+--- a/application/qmodem/files/usr/share/qmodem/cmds/huawei.sh
++++ b/application/qmodem/files/usr/share/qmodem/cmds/huawei.sh
+@@ -52,6 +52,12 @@
+ cmd_cnum()
+ {
+     at "$1" "AT+CNUM"
++}
++
++#query signal fields (LTE: RSSI, RSRP, SINR, RSRQ)
++cmd_hcsq_query()
++{
++    at "$1" "AT^HCSQ?"
+ }
+ 
+ #query IMSI
+--- /dev/null
++++ b/application/qmodem/files/usr/share/qmodem/modem_fields.awk
+@@ -0,0 +1,34 @@
++# Parse Huawei CNUM/HCSQ response lines. Unrelated URCs are ignored.
++function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
++function csv(s, a,    i,n,c,q,nextc) {
++    n=1; q=0; a[n]=""
++    for (i=1; i<=length(s); i++) {
++        c=substr(s,i,1); nextc=substr(s,i+1,1)
++        if (c=="\"") {
++            if (q && nextc=="\"") { a[n]=a[n] "\""; i++ }
++            else q=!q
++        } else if (c=="," && !q) { n++; a[n]="" }
++        else a[n]=a[n] c
++    }
++    return q ? 0 : n
++}
++mode=="cnum" && /^[ \t]*\+CNUM[ \t]*:/ {
++    line=$0; sub(/^[ \t]*\+CNUM[ \t]*:[ \t]*/, "", line)
++    if (csv(line, fields)<3) next
++    number=trim(fields[2]); kind=trim(fields[3])
++    # The first field is a label, never a fallback subscriber number.
++    if (number !~ /^\+?[0-9]+$/) next
++    digits=number; sub(/^\+/, "", digits)
++    if (length(digits)<3 || length(digits)>15) next
++    if (kind=="145" && number !~ /^\+/) number="+" number
++    print number; exit
++}
++mode=="lte_sinr" && /^[ \t]*\^HCSQ[ \t]*:/ {
++    line=$0; sub(/^[ \t]*\^HCSQ[ \t]*:[ \t]*/, "", line)
++    if (csv(line, fields)<5 || trim(fields[1])!="LTE") next
++    # LTE order: RSSI, RSRP, SINR, RSRQ. 255/reserved values are unknown.
++    value=trim(fields[4])
++    if (value !~ /^[0-9]+$/ || value+0>251) next
++    printf "%.0f\n", -20 + (value+0>250 ? 250 : value+0)*0.2
++    exit
++}
+--- a/luci/luci-app-qmodem-sms/luasrc/controller/qmodem_sms.lua
++++ b/luci/luci-app-qmodem-sms/luasrc/controller/qmodem_sms.lua
+@@ -1,76 +1,18 @@
+ module("luci.controller.qmodem_sms", package.seeall)
+ 
+-local http = require "luci.http"
+-local json = require "luci.jsonc"
+-local ubus = require "ubus"
+-
+-local function backend_call(method, arguments)
+-	local connection = ubus.connect()
+-	if not connection then
+-		return { status = "error", error = "SMS backend unavailable" }
+-	end
+-	local result = connection:call("qmodem.sms", method, arguments or {})
+-	connection:close()
+-	return result or { status = "error", error = "SMS backend call failed" }
++-- QModem owns receiving/forwarding. The Balong WebUI owns SMS management.
++-- Keep forwarding settings; the duplicate UI and storage/list/write routes stop here.
++function index()
++    for _, route in ipairs({"modem_sms", "send_sms", "get_sms", "delete_sms", "sms_storage"}) do
++        entry({"admin", "modem", "qmodem", route}, call("sms_management_removed"), nil).leaf = true
++    end
++    entry({"admin", "modem", "qmodem", "sms_forward"}, cbi("qmodem_sms/sms_forward"), luci.i18n.translate("SMS Forward"), 12).leaf = true
++    entry({"admin", "modem", "qmodem", "sms_forward_extedit"}, cbi("qmodem_sms/sms_forward_extedit")).leaf = true
+ end
+ 
+-local function reply(value)
+-	http.prepare_content("application/json")
+-	http.write_json(value)
++function sms_management_removed()
++    local http = require "luci.http"
++    http.status(410, "Gone")
++    http.prepare_content("application/json")
++    http.write_json({error="短信管理请使用巴龙 WebUI。"})
+ end
+-
+-function index()
+-	entry({"admin", "modem", "qmodem", "modem_sms"}, template("modem_sms/modem_sms"), luci.i18n.translate("SMS"), 11).leaf = true
+-	entry({"admin", "modem", "qmodem", "send_sms"}, call("sendSMS"), nil).leaf = true
+-	entry({"admin", "modem", "qmodem", "get_sms"}, call("getSMS"), nil).leaf = true
+-	entry({"admin", "modem", "qmodem", "delete_sms"}, call("delSMS"), nil).leaf = true
+-	entry({"admin", "modem", "qmodem", "sms_storage"}, call("setStorage"), nil).leaf = true
+-	entry({"admin", "modem", "qmodem", "sms_forward"}, cbi("qmodem_sms/sms_forward"), luci.i18n.translate("SMS Forward"), 12).leaf = true
+-	entry({"admin", "modem", "qmodem", "sms_forward_extedit"}, cbi("qmodem_sms/sms_forward_extedit")).leaf = true
+-end
+-
+-function getSMS()
+-	local modem_id = http.formvalue("cfg")
+-	local result = backend_call("list", { modem_id = modem_id, limit = 500, offset = 0 })
+-	if result.mode == "database_poll" then
+-		backend_call("sync", { modem_id = modem_id })
+-		result = backend_call("list", { modem_id = modem_id, limit = 500, offset = 0 })
+-	end
+-	local messages = result.messages or result.msg or result.received or {}
+-	local received = {}
+-	for _, message in ipairs(messages) do
+-		if not message.type or message.type == "received" then
+-			message.index = message.index or message.id
+-			received[#received + 1] = message
+-		end
+-	end
+-	reply({ msg = received, mode = result.mode, error = result.error })
+-end
+-
+-function sendSMS()
+-	local result = backend_call("send", {
+-		modem_id = http.formvalue("cfg"),
+-		recipient = http.formvalue("phone_number"),
+-		content = http.formvalue("message_content")
+-	})
+-	reply({ result = { status = result.status == "success" and 1 or 0 }, backend = result })
+-end
+-
+-function delSMS()
+-	local modem_id = http.formvalue("cfg")
+-	local changed = 0
+-	for id in (http.formvalue("index") or ""):gmatch("%d+") do
+-		local result = backend_call("delete", { modem_id = modem_id, id = tonumber(id), index = tonumber(id) })
+-		if result.status == "success" then changed = changed + 1 end
+-	end
+-	reply({ success = true, deleted = changed })
+-end
+-
+-function setStorage()
+-	local values = json.parse(http.formvalue("storage") or "{}") or {}
+-	local result = backend_call("storage_set", {
+-		modem_id = http.formvalue("cfg"), mem1 = values.mem1,
+-		mem2 = values.mem2, mem3 = values.mem3
+-	})
+-	reply(result)
+-end
+--- a/application/qmodem/Makefile
++++ b/application/qmodem/Makefile
+@@ -5,7 +5,7 @@
+ include ../../version.mk
+ 
+ PKG_NAME:=qmodem
+-PKG_RELEASE:=$(QMODEM_RELEASE).ultra3
++PKG_RELEASE:=$(QMODEM_RELEASE).ultra4
+ PKG_VERSION:=$(QMODEM_VERSION)
+ 
+ include $(INCLUDE_DIR)/package.mk
+--- a/luci/luci-app-qmodem-sms/Makefile
++++ b/luci/luci-app-qmodem-sms/Makefile
+@@ -9,6 +9,7 @@
+ PKG_NAME:=luci-app-qmodem-sms
+ LUCI_TITLE:=Luci qwrt modem sms support
+ PKG_VERSION:=$(QMODEM_VERSION)
++PKG_RELEASE:=20261023.1
+ LUCI_PKGARCH:=all
+ PKG_LICENSE:=GPLv3
+ PKG_LINCESE_FILES:=LICENSE

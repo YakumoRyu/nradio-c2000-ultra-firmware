@@ -41,8 +41,10 @@ node tests/test-v302-frontend.cjs
 
 CPU维护更新的回归使用`python3 tests/test-usb-watchdog.py`、`lua5.1 tests/test-cpu-sample.lua`和`python3 tests/test-cpu-hotfix.py`。CPU安装器为`scripts/ultra-cpu-hotfix.py`，发布归档包含5个目标文件与校验清单，完整固件通过`overlay`集成相同文件。
 
-累计维护包使用`scripts/ultra-maintenance-hotfix.py`，当前包含9个目标文件，并记录r4/r5/r6三基线的原始校验值。安装器回归执行`ULTRA_HOTFIX_SCRIPT=scripts/ultra-maintenance-hotfix.py python3 tests/test-cpu-hotfix.py`；归档分别对三种基线验证安装、重复安装、回退、个人配置保持和错误输入拒绝。无线模块在重启后生效。
+累计维护包使用`scripts/ultra-maintenance-hotfix.py`，当前包含15个目标文件，并记录r4/r5/r6/r7四基线的原始校验值。安装器回归执行`ULTRA_HOTFIX_SCRIPT=scripts/ultra-maintenance-hotfix.py python3 tests/test-cpu-hotfix.py`；归档分别对四种基线验证安装、重复安装、回退、个人配置保持和错误输入拒绝。无线模块在重启后生效。
 
 无线接收修复为`954-recover-invalid-rx-dma-descriptors.patch`，与952 NAPI补丁共同应用。对已应用补丁的厂商源码运行`python3 tests/test-wifi-dma.py /path/to/wlan_hwifi/bus/mtk_pci_dma.c`和`python3 tests/test-wifi-napi.py /path/to/wlan_hwifi/bus/mtk_pci_dma.c`，分别编译真实函数并执行14项DMA/恢复场景与7项NAPI场景。DMA测试启用AddressSanitizer和UndefinedBehaviorSanitizer。
 
 网口、AT字段和显示升级工具的回归分别为`tests/test-ultra-ports.py`、`tests/test-modem-fields.py`、`tests/test-modem-fields.lua`及`tests/test-ui-hotfix.py`。Lua用5.1运行；网口事务测试可通过`UCI_RUNNER`指定实际目标UCI的JSON参数列表，其余协议测试独立执行。
+
+号码/SMS维护补丁为`patches/qmodem/0003-huawei-subscriber-number-and-lte-sinr.patch`，应用在0001/0002之后，包含QModem及短信LuCI包修订。执行`python3 tests/test-modem-fields-sms.py`；重编qmodem和luci-app-qmodem-sms，确保可选仓库与ROM一致。

@@ -36,6 +36,10 @@ local has_bootsw = fs.access(BOOTSW)
 
 local bootsw_action = http.formvalue("bootsw")
 if has_bootsw and (bootsw_action == "official" or bootsw_action == "sd") then
+    if not is_c2000 or not require("luci.dispatcher").test_post_security() then
+        http.status(403, "Forbidden")
+        return
+    end
     local target = (bootsw_action == "official") and "to-official" or "to-sd"
     local name   = (bootsw_action == "official") and "官方系统" or "SD 卡系统"
 
@@ -126,11 +130,7 @@ local section = m:section(TypedSection, "ndis", translate("Mwrt固件设置"))
 section.anonymous = true
 section.addremove = false
 section:tab("displayst", translate("屏幕保护/USB网卡开关"))
--- 系统切换 tab 仅 C2000 系列显示;其余机型不创建该 tab(功能不出现)
-if is_c2000 then
-section:tab("osst", translate("系统切换"),
-            translate("在当前 存储卡 系统和设备内置的官方系统之间切换。切换只改 U-Boot 的启动标识，两个系统各自的数据都保留，随时可以切回来。"))
-end
+-- The boot selector does not depend on a legacy mwrt.ndis configuration section.
 
 -- ---- 启动系统切换 UI ------------------------------------------------------
 -- 脚本的报错信息会原样进 HTML,这里手工转义。
@@ -173,15 +173,6 @@ if not bs_ready then
     put('<div class="bsw-err"><b>当前固件暂时无法切换</b><br>')
     put(esc(bs_error or "未知原因"))
     put('</div>')
-    put([[<div class="bsw-tip"><b>为什么</b><br>
-boot_from_sd 这个启动标识存在 SPI NOR 的 u-boot-env 分区里 ——
-U-Boot 必须在“去 SD 还是去内置 flash”这个决定之前就读到它，所以它只能放在 NOR 上。
-而当前固件的设备树里 SPI 控制器是关闭的，<code>/proc/mtd</code> 是空的，读写无从下手。
-<div style="margin-top:8px"><b>怎么解决</b>：重新编译固件，加入
-<code>mt7987-nradio-c2000maxUltra-spinor.dtsi</code>（放出 NOR 上的 u-boot-env 分区），
-刷入后本页即可正常使用。详见交付包里的说明文档。</div>
-<div style="margin-top:8px">在此期间仍可用 TTL 串口进 U-Boot 手动切换：
-<code>setenv boot_from_sd 0; saveenv; reset</code></div></div>]])
 else
     local cur_is_sd = (bs_value == "1")
     local cur_name  = cur_is_sd and "SD 卡系统（Mwrt）" or "设备内置官方系统"
@@ -201,15 +192,13 @@ else
     if cur_is_sd then
         put([[<div class="bsw-tip"><b>切换到官方系统后</b>
 <ul class="bsw-steps">
-<li>设备会从内置 flash 启动，本管理页面（192.168.66.1）将不再可用</li>
-<li>官方系统的管理地址和账号密码请以官方说明为准</li>
-<li>SD 卡不用拔，卡上的 Mwrt 系统和数据完整保留</li>
-<li>想切回来：在官方系统里把 设置启动顺序 改成 存储卡 优先，或用 TTL 串口执行
-<code>setenv boot_from_sd 1; saveenv; reset</code></li>
+<li>设备重启后进入内置官方系统</li>
+<li>TF 卡系统和数据保留</li>
+<li>在官方系统里将启动顺序改为存储卡优先，即可切回 TF 卡系统</li>
 </ul></div>]])
         put([[<div class="bsw-act">
 <input type="button" class="cbi-button cbi-button-reset" value="切换到官方系统并重启"
-    onclick="if(confirm('切换后设备将从内置官方系统启动，本页面（192.168.66.1）不再可用。\n\nSD 卡上的系统和数据会完整保留，之后可以切回来。\n\n确认切换并立即重启？')){document.getElementById('bootsw').value='official';this.form.submit();}">
+    onclick="if(confirm('设备将重启并进入内置官方系统，TF 卡系统和数据保留。\n\n确认切换并立即重启？')){document.getElementById('bootsw').value='official';this.form.submit();}">
 <input type="hidden" id="bootsw" name="bootsw" value="">
 </div>]])
     else
@@ -226,7 +215,8 @@ end
 put('</div>')
 
 if is_c2000 then
-    local btn = section:taboption("osst", DummyValue, "_bootsw_btn", "")
+    local boot_section = m:section(SimpleSection, translate("系统切换"))
+    local btn = boot_section:option(DummyValue, "_bootsw_btn", "")
     btn.rawhtml = true
     btn.cfgvalue = function(self, section)
         return table.concat(bs_html)

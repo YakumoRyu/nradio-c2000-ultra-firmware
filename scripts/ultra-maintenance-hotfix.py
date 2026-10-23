@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""Install the reviewed wireless DMA recovery and cumulative maintenance fixes with checked rollback."""
+"""Install the reviewed modem/SMS and cumulative maintenance fixes with checked rollback."""
 import argparse,fcntl,hashlib,json,os,subprocess,tempfile
 from pathlib import Path
 
-VERSION='20261017-r1'
+VERSION='20261023-r1'
 BACKUP='overlay/ultra-hotfix-backups/maintenance-'+VERSION
 
 
@@ -49,7 +49,8 @@ def apply(root,payload,manifest):
             if current is None:(root/rel).unlink()
             else:write(root/rel,current,mode)
         record.unlink();raise
-    return {'ok':True,'changed':True,'files':len(plan),'backup':'/'+BACKUP}
+    return {'ok':True,'changed':True,'files':len(plan),'backup':'/'+BACKUP,
+            'reboot_required':any(rel.startswith('lib/modules/') for rel,_,_,_ in plan)}
 
 def rollback(root):
     directory=root/BACKUP;record=directory/'record.json'
@@ -63,7 +64,8 @@ def rollback(root):
             if (root/rel).exists():(root/rel).unlink()
         else:write(root/rel,(directory/rel).read_bytes(),entry['mode'])
     record.unlink()
-    return {'ok':True,'rolled_back':True}
+    return {'ok':True,'rolled_back':True,
+            'reboot_required':any(rel.startswith('lib/modules/') for rel in data['files'])}
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -80,7 +82,7 @@ def main():
         # LuCI recompiles its menu cache on the next request; no service restarts.
         for item in Path('/tmp').glob('luci-indexcache*'):
             if item.is_file():item.unlink()
-    r['reboot_required']=True
+    r.setdefault('reboot_required',False)
     print(json.dumps(r))
 
 if __name__=='__main__':
