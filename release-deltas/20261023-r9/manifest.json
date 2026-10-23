@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "assets": [
+    {
+      "base_tag": "ultra-25.12-20261023-r8",
+      "base_asset": "ultra-25.12-20261023-r8-nradio-c2000ultra-sysupgrade.bin",
+      "base_sha256": "6031324fad1daa6ccb92310b341bcc17510ee4b7c22f470de87d78b75106d411",
+      "target_tag": "ultra-25.12-20261023-r9",
+      "target_asset": "ultra-25.12-20261023-r9-nradio-c2000ultra-sysupgrade.bin",
+      "target_sha256": "e96b8f60180dfa59cf6216d489def91acb804ed85abb174daaae4f5fb90dba5f",
+      "target_bytes": 215983327,
+      "delta": "release-deltas/20261023-r9/nradio-c2000ultra-sysupgrade.bin.bsdiff",
+      "delta_sha256": "5f81e7acd11d837663dc53ef5762574cbefb5a6f1d8032852a3fe9fe08305fb8",
+      "delta_bytes": 152712
+    },
+    {
+      "base_tag": "ultra-25.12-20261023-r8",
+      "base_asset": "ultra-25.12-20261023-r8-optional-packages.tar.gz",
+      "base_sha256": "6007833e08dd24c5e98a2b7ce0b3fed6fb643b74ddd706f546790baab983d557",
+      "target_tag": "ultra-25.12-20261023-r9",
+      "target_asset": "ultra-25.12-20261023-r9-optional-packages.tar.gz",
+      "target_sha256": "57dabb22a853c198433387aaf55c63c784700a7f97344183bf5b8f0faf130f6c",
+      "target_bytes": 151015051,
+      "delta": "release-deltas/20261023-r9/optional-packages.tar.gz.bsdiff",
+      "delta_sha256": "aaa8410e6ccc3bbb7cff3c223ed2450f4b16a4e421cea2b194c80e3b62bb526e",
+      "delta_bytes": 7582492
+    }
+  ]
+}

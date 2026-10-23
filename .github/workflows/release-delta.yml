@@ -1,0 +1,24 @@
+name: Reconstruct release attachments
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reconstruct:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update -qq && sudo apt-get install -y bsdiff
+      - run: python3 .github/scripts/release_delta_assets.py release-deltas/20261023-r9/manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-delta-verification
+          path: release-delta-verification.json
