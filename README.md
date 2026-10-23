@@ -8,22 +8,22 @@
 | 内核 | Linux6.12.103 |
 | 无线 | 联发科闭源驱动8.3.1.2 |
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r2 |
-| 完整固件 | ultra-25.12-20261023-r8 |
-| 升级包 | ultra-maintenance-20261023-1 |
+| 完整固件 | ultra-25.12-20261023-r9 |
+| 升级包 | ultra-maintenance-20261023-2 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261023-1) | 在已安装r4/r5/r6/r7更新的Ultra25.12 TF系统上安装无线DMA、CPU、首页与运营商图标累计修复，保留配置。 |
-| [完整r8固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261023-r8) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261023-2) | 在r4/r5/r6/r7/r8基线上安装17文件累计修复，保留配置。r8仅更新两个媒体保护文件。 |
+| [完整r9固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261023-r9) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次SIM号码、短信入口和系统切换界面修复已在实机与浏览器验证，用户确认号码和短信入口正常。累计包覆盖r4/r5/r6/r7；完整r8为整镜像待实机启动的预发布版本。
+本次修复媒体保护查询超时、停服后恢复和重启状态保存，并调整Emby内存回收水位。实机媒体库、内外网视频分段读取及3分钟持续监测通过；完整r9为整镜像待实机启动的预发布版本。
 
 完整固件约206MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261023-1/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261023-2/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)
@@ -32,6 +32,7 @@
 
 ## 已集成的改动
 
+- **媒体资源保护**：Docker超时继续监测，分步恢复、跨重启保存保护目标，Emby采用320MiB回收水位及384MiB硬限制，保留后台追赶分析。
 - **号码与短信**：正确解析SIM号码，短信管理统一到巴龙WebUI，保留PushPlus和QModem后台。
 - **系统切换**：按钮独立于旧配置节，POST/CSRF校验；LTE SINR补读采用正确字段顺序。[1150对比](docs/MWRT1150_COMPARISON.md)。
 

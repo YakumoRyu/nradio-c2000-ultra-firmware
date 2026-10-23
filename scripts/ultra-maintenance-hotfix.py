@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""Install the reviewed modem/SMS and cumulative maintenance fixes with checked rollback."""
+"""Install cumulative Ultra maintenance fixes with checked rollback."""
 import argparse,fcntl,hashlib,json,os,subprocess,tempfile
 from pathlib import Path
 
-VERSION='20261023-r1'
+VERSION='20261023-r2'
 BACKUP='overlay/ultra-hotfix-backups/maintenance-'+VERSION
 
 
@@ -49,7 +49,7 @@ def apply(root,payload,manifest):
             if current is None:(root/rel).unlink()
             else:write(root/rel,current,mode)
         record.unlink();raise
-    return {'ok':True,'changed':True,'files':len(plan),'backup':'/'+BACKUP,
+    return {'ok':True,'changed':True,'files':len(plan),'changed_paths':[rel for rel,_,_,_ in plan],'backup':'/'+BACKUP,
             'reboot_required':any(rel.startswith('lib/modules/') for rel,_,_,_ in plan)}
 
 def rollback(root):
@@ -64,7 +64,7 @@ def rollback(root):
             if (root/rel).exists():(root/rel).unlink()
         else:write(root/rel,(directory/rel).read_bytes(),entry['mode'])
     record.unlink()
-    return {'ok':True,'rolled_back':True,
+    return {'ok':True,'rolled_back':True,'changed_paths':list(data['files']),
             'reboot_required':any(rel.startswith('lib/modules/') for rel in data['files'])}
 
 def main():
@@ -82,6 +82,17 @@ def main():
         # LuCI recompiles its menu cache on the next request; no service restarts.
         for item in Path('/tmp').glob('luci-indexcache*'):
             if item.is_file():item.unlink()
+        if any(p.startswith('usr/lib/codex-media/') for p in r.get('changed_paths',[])):
+            running=False
+            for proc in Path('/proc').iterdir():
+                if not proc.name.isdigit():continue
+                try:
+                    args=(proc/'cmdline').read_bytes().split(b'\0')
+                    if b'/usr/lib/codex-media/media-health.py' in args:running=True;break
+                except OSError:pass
+            if running:
+                subprocess.run(['/etc/init.d/codex-media-health','restart'],check=True,timeout=30)
+                r['media_guard_restarted']=True
     r.setdefault('reboot_required',False)
     print(json.dumps(r))
 

@@ -1,8 +1,15 @@
 """Give routing priority when media services cause sustained memory or I/O pressure."""
-import json,os,subprocess,time
+import json,os,subprocess,time,http.client,socket
+from pathlib import Path
 DOCKER='/usr/bin/docker'
 STATUS='/tmp/codex-media-protection.json'
+PERSIST='/overlay/media-stack/resource-protection-state.json'
+persist_error_reported=False
 ALLOWED=('autofilm','emby','mediawarp','openlist')
+RESUME_AVAILABLE_MB={'openlist':192,'emby':256,'mediawarp':192,'autofilm':224}
+RESUME_ORDER=('openlist','emby','mediawarp','autofilm')
+STABLE_SECONDS=120
+STAGE_SECONDS=120
 
 class PressureGate:
  def __init__(self):self.since={}
@@ -18,9 +25,44 @@ class PressureGate:
    else:self.since.pop(key,None)
   return None
 
+class DockerHTTP(http.client.HTTPConnection):
+ def __init__(self):super().__init__('localhost',timeout=1)
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);self.sock.settimeout(self.timeout);self.sock.connect('/var/run/docker.sock')
+
+def process_inspect(proc_root='/proc',cgroup_root='/sys/fs/cgroup'):
+ names={'embyserver':'emby','mediawarp':'mediawarp','openlist':'openlist','autofilm':'autofilm'}
+ candidates={n:[] for n in ALLOWED}
+ for root in Path(proc_root).iterdir():
+  if not root.name.isdigit():continue
+  try:
+   exe=os.path.basename((root/'cmdline').read_bytes().split(b'\0',1)[0].decode()).lower()
+   name=names.get(exe)
+   if not name:continue
+   rows=(root/'cgroup').read_text().splitlines()
+   for row in rows:
+    if not row.startswith('0::/docker/'):continue
+    ident=row[len('0::/docker/'):]
+    if len(ident)==64 and all(c in '0123456789abcdef' for c in ident) and (Path(cgroup_root)/'docker'/ident/'cgroup.procs').exists():
+     candidates[name].append({'id':ident,'pid':int(root.name),'running':True})
+  except (OSError,UnicodeError):continue
+ return {n:(rows[0] if len(rows)==1 else {'id':'','pid':0,'running':False}) for n,rows in candidates.items()}
+
 def inspect():
- rows=json.loads(subprocess.check_output([DOCKER,'inspect',*ALLOWED],timeout=7,stderr=subprocess.DEVNULL))
- return {x['Name'].lstrip('/'):{'id':x['Id'],'running':x['State']['Running'],'pid':x['State']['Pid']} for x in rows}
+ # A blocked container inspect must not freeze all memory/CPU protection.
+ result={};fallback=None
+ for name in ALLOWED:
+  conn=DockerHTTP()
+  try:
+   conn.request('GET','/containers/'+name+'/json');response=conn.getresponse()
+   if response.status!=200:raise OSError('Docker inspect unavailable')
+   row=json.loads(response.read())
+   result[name]={'id':row['Id'],'running':row['State']['Running'],'pid':row['State']['Pid']}
+  except (OSError,ValueError,KeyError,http.client.HTTPException):
+   if fallback is None:fallback=process_inspect()
+   result[name]=fallback[name]
+  finally:conn.close()
+ return result
 
 def cpu_paths(containers):
  paths=[]
@@ -50,7 +92,9 @@ def memory_high_paths(containers):
 def apply_memory_high(paths):
  for path in paths:
   try:
-   value=str(256*1048576)
+   # DLL mappings and SQLite pages are part of memory.current too. A low high
+   # watermark repeatedly evicts them on TF storage despite ample host memory.
+   value=str(320*1048576)
    with open(path) as f:current=f.read().strip()
    if current!=value:
     with open(path,'w') as f:f.write(value+'\n')
@@ -123,9 +167,34 @@ class CorePressure:
   durations={name:round(now-since,1) for name,since in self.since.items()}
   return {'single_core_saturation_seconds':max(durations.values(),default=0),'network_softirq_hotspot':any(seconds>=20 and soft.get(name,0)>=80 for name,seconds in durations.items())}
 
-def safe_to_resume(measured):
+def safe_to_resume(measured,name='emby'):
  peak=measured.get('max_core_busy_percent')
- return measured['available_mb']>=384 and measured['cpu_busy_percent']<50 and measured['iowait_percent']<10 and peak is not None and peak<85
+ swap=measured.get('swap_in_mb_per_second')
+ return measured['available_mb']>=RESUME_AVAILABLE_MB[name] and measured['cpu_busy_percent']<80 and measured['iowait_percent']<10 and peak is not None and peak<95 and not measured.get('network_softirq_hotspot',False) and (swap is None or swap<2)
+
+class RecoveryPlan:
+ def __init__(self,old,boot_id,now):
+  self.attempts=[]
+  if old.get('boot_id')==boot_id:
+   self.attempts=[v for v in old.get('recovery_attempts',[]) if isinstance(v,dict) and v.get('name') in ALLOWED and isinstance(v.get('uptime'),(int,float)) and 0<=now-v['uptime']<3600]
+   # Preserve the hourly cooldown of the preceding guard version.
+   if not self.attempts:
+    recent=[v for v in old.get('recovery_uptimes',[]) if isinstance(v,(int,float)) and 0<=now-v<3600]
+    if recent:self.attempts=[{'name':n,'uptime':max(recent)} for n in ALLOWED]
+  self.healthy_since=None;self.candidate=None
+ def next(self,stopped,measured,now,last_stop):
+  self.attempts=[v for v in self.attempts if 0<=now-v['uptime']<3600]
+  name=next((n for n in RESUME_ORDER if n in stopped),None)
+  if name!=self.candidate:self.healthy_since=None;self.candidate=name
+  if name is None:return None
+  if not safe_to_resume(measured,name):self.healthy_since=None;return None
+  if self.healthy_since is None:self.healthy_since=now
+  if now-self.healthy_since<STABLE_SECONDS or now-last_stop<600:return None
+  if any(v['name']==name for v in self.attempts):return None
+  if self.attempts and now-max(v['uptime'] for v in self.attempts)<STAGE_SECONDS:return None
+  return name
+ def requested(self,name,now):
+  self.attempts.append({'name':name,'uptime':now});self.healthy_since=None
 
 def restore_guard_state(old,boot_id,now):
  if not isinstance(old,dict):return [],0,[],None
@@ -139,24 +208,54 @@ def restore_guard_state(old,boot_id,now):
 
 
 def write(data):
- with open(STATUS+'.tmp','w') as f:json.dump(data,f)
+ with open(STATUS+'.tmp','w') as f:
+  json.dump(data,f);f.flush();os.fsync(f.fileno())
  os.replace(STATUS+'.tmp',STATUS)
+
+def load_state():
+ for path in (STATUS,PERSIST):
+  try:
+   with open(path) as f:data=json.load(f)
+   if isinstance(data,dict):return data
+  except (OSError,ValueError,TypeError):pass
+ return {}
+
+def persist_state(data):
+ # Only ownership/actions change on TF storage; five-second measurements stay in tmpfs.
+ keys=('boot_id','stopped_by_guard','last_stop_uptime','recovery_uptimes','recovery_attempts','last_action')
+ state={k:data[k] for k in keys}
+ try:
+  with open(PERSIST) as f:
+   if json.load(f)==state:return
+ except (OSError,ValueError,TypeError):pass
+ with open(PERSIST+'.tmp','w') as f:
+  os.chmod(PERSIST+'.tmp',0o600);json.dump(state,f);f.flush();os.fsync(f.fileno())
+ os.replace(PERSIST+'.tmp',PERSIST)
+
+def checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan):
+ global persist_error_reported
+ data={'epoch':time.time(),'boot_id':boot_id,'last_stop_uptime':last_stop,'recovery_uptimes':recoveries,'recovery_attempts':plan.attempts,'next_recovery':plan.candidate,'state':'media_suspended_for_routing' if stopped else 'protecting','measurements':measured,'stopped_by_guard':stopped,'last_action':last_action,'automatic_recoveries_last_hour':len(recoveries),'thresholds':{'critical_available_mb':64,'sustained_available_mb':128,'memory_duration_seconds':15,'sustained_iowait_percent':30,'swap_in_mb_per_second':2,'cpu_busy_percent':90,'cpu_duration_seconds':20,'resume_available_mb':RESUME_AVAILABLE_MB,'resume_cpu_busy_percent':80,'resume_stable_seconds':STABLE_SECONDS,'recovery_stage_seconds':STAGE_SECONDS}}
+ write(data)
+ try:persist_state(data);persist_error_reported=False
+ except OSError:
+  if not persist_error_reported:print('media-protection: persistent state unavailable; tmpfs protection remains active',flush=True)
+  persist_error_reported=True
 
 def stop(names):
  assert names and all(n in ALLOWED for n in names)
  subprocess.run([DOCKER,'stop','--time','8',*names],timeout=30,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 def run():
- gate=PressureGate();core_pressure=CorePressure();healthy_since=None;hotspot_reported=False
- boot_id=open('/proc/sys/kernel/random/boot_id').read().strip()
- try:old=json.load(open(STATUS))
- except (OSError,ValueError,TypeError):old={}
+ gate=PressureGate();core_pressure=CorePressure();hotspot_reported=False
+ with open('/proc/sys/kernel/random/boot_id') as f:boot_id=f.read().strip()
+ old=load_state()
  stopped,last_stop,recoveries,last_action=restore_guard_state(old,boot_id,time.monotonic())
+ plan=RecoveryPlan(old if isinstance(old,dict) else {},boot_id,time.monotonic())
  paths=[];high_paths=[];previous=None;last_path_check=0;last_error=None
  while True:
   try:
    now=time.monotonic()
-   if now-last_path_check>=60 or not paths:
+   if now-last_path_check>=60 or not last_path_check:
     containers=inspect();paths=cpu_paths(containers);high_paths=memory_high_paths(containers);last_path_check=now
    apply_memory_high(high_paths)
    current=snapshot(paths)
@@ -170,21 +269,30 @@ def run():
    recoveries=[t for t in recoveries if now-t<3600]
    if reason:
     running=inspect()
-    targets=[n for n in ('autofilm','emby') if running[n]['running']]
-    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if running[n]['running']]
+    # Shed one service, then remeasure before touching the next service.
+    order=('emby','autofilm') if reason=='critical_memory' else ('autofilm','emby')
+    targets=[n for n in order if running[n]['running']][:1]
+    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if running[n]['running']][:1]
     if targets:
-     stop(targets);stopped=list(dict.fromkeys(stopped+targets));last_stop=now;healthy_since=None;gate=PressureGate();last_action={'epoch':time.time(),'action':'stop_media','reason':reason,'containers':targets}
+     # Save ownership before Docker can time out after actually stopping a container.
+     stopped=list(dict.fromkeys(stopped+targets));last_stop=now;plan.healthy_since=None;gate=PressureGate();last_action={'epoch':time.time(),'action':'stop_media','reason':reason,'containers':targets,'result':'requested'}
+     checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
+     stop(targets)
+     last_action['result']='completed'
      print('media-protection: stopped '+','.join(targets)+' for '+reason,flush=True)
    elif stopped:
-    sufficiently_free=safe_to_resume(measured)
-    healthy_since=(healthy_since if healthy_since is not None else now) if sufficiently_free else None
-    # At most one automatic restart per hour, only after 5 stable minutes and 10 minutes cooldown.
-    if healthy_since is not None and now-healthy_since>=300 and now-last_stop>=600 and not recoveries:
-     targets=[n for n in ('openlist','mediawarp','emby','autofilm') if n in stopped]
-     for name in targets:
-      subprocess.run([DOCKER,'start',name],check=True,timeout=15,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-     stopped=[];recoveries.append(now);healthy_since=None;last_action={'epoch':time.time(),'action':'restart_media_after_cooldown','containers':targets};print('media-protection: cautious recovery after stable routing headroom',flush=True)
-   write({'epoch':time.time(),'boot_id':boot_id,'last_stop_uptime':last_stop,'recovery_uptimes':recoveries,'state':'media_suspended_for_routing' if stopped else 'protecting','measurements':measured,'stopped_by_guard':stopped,'last_action':last_action,'automatic_recoveries_last_hour':len(recoveries),'thresholds':{'critical_available_mb':64,'sustained_available_mb':128,'memory_duration_seconds':15,'sustained_iowait_percent':30,'swap_in_mb_per_second':2,'cpu_busy_percent':90,'cpu_duration_seconds':20}})
+    # An operator or a timed-out Docker request may already have started it.
+    running=inspect()
+    stopped=[n for n in stopped if not running[n]['running']]
+    name=plan.next(stopped,measured,now,last_stop)
+    if name:
+     plan.requested(name,now);last_action={'epoch':time.time(),'action':'restart_media_stage','containers':[name],'result':'requested'}
+     checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
+     subprocess.run([DOCKER,'start',name],check=True,timeout=30,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+     if not inspect()[name]['running']:raise RuntimeError('Container did not become running')
+     stopped.remove(name);recoveries.append(now);last_path_check=0;previous=None
+     last_action['result']='completed';print('media-protection: recovered '+name+' after stable routing headroom',flush=True)
+   checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
    last_error=None
   except Exception as e:
    if type(e).__name__!=last_error:print('media-protection: check error '+type(e).__name__,flush=True);last_error=type(e).__name__

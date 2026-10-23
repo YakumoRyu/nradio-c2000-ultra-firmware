@@ -20,6 +20,7 @@ jobs:
       - run: lua5.1 tests/test-cpu-sample.lua
       - run: python3 tests/test-usb-watchdog.py
       - run: python3 tests/test-cpu-hotfix.py
+      - run: python3 tests/test-media-protection.py
       - run: ULTRA_HOTFIX_SCRIPT=scripts/ultra-maintenance-hotfix.py python3 tests/test-cpu-hotfix.py
       - run: sh -n overlay/usr/bin/mwrt-qmodem-usb3 && sh -n overlay/www/cgi-bin/router3d-data
       - run: sh -n overlay/usr/libexec/qmodem-at-ubus

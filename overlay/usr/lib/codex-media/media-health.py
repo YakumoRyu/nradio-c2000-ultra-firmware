@@ -76,7 +76,7 @@ def recovery_headroom():
   state=json.load(open('/tmp/codex-media-protection.json'))
   if not 0<=time.time()-state['epoch']<45:return False
   m=state['measurements'];peak=m.get('max_core_busy_percent')
-  return not state['stopped_by_guard'] and m['available_mb']>=128 and m['cpu_busy_percent']<85 and m['iowait_percent']<20 and peak is not None and peak<95 and not m.get('network_softirq_hotspot',False)
+  return 'openlist' not in state['stopped_by_guard'] and m['available_mb']>=128 and m['cpu_busy_percent']<85 and m['iowait_percent']<20 and peak is not None and peak<95 and not m.get('network_softirq_hotspot',False)
  except (OSError,ValueError,KeyError,TypeError):return False
 
 def main(once=False):
