@@ -26,7 +26,7 @@ def rollback():
     record=json.loads((BACKUP/'record.json').read_text())
     package=BACKUP/record['package']
     assert digest(package)==record['sha256'], '回退包校验失败'
-    run(['opkg', '--force-confold', '--force-downgrade', '--force-reinstall', 'install', str(package)])
+    run(['opkg', '--force-downgrade', '--force-reinstall', 'install', str(package)])
     restart()
     assert verify_files(record['files']), '回退文件校验失败'
     (BACKUP/'restored').write_text(str(time.time()))
@@ -53,7 +53,7 @@ def apply(base):
     (BACKUP/'record.json').write_text(json.dumps(record))
     os.chmod(BACKUP/'record.json',0o600)
     try:
-        run(['opkg','--force-confold','install',str(base/manifest['package'])])
+        run(['opkg','install',str(base/manifest['package'])])
         restart()
         assert verify_files(manifest['files']), '安装后文件校验失败'
         assert 'Version: 3.0.2-r3\n' in installed(), '软件包版本未更新'

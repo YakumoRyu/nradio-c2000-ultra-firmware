@@ -44,6 +44,18 @@
     "tag": "v3.0.2",
     "commit": "4bf3ae253d7ba98cb5a4c5f2a545b40610a4fbcd"
   },
-  "release": "ultra-25.12-20261013-r3",
-  "source_date_epoch": 1787997242
+  "release": "ultra-25.12-20261026-r12",
+  "source_date_epoch": 1787997242,
+  "proxy_components": {
+    "openclash": {
+      "upstream_tag": "v0.48.002",
+      "package_recipe": "packages/luci-app-openclash/Makefile",
+      "official_ipk_sha256": "f3f0d0514553aea8d542c62dc52ac26d1f79dbda24204280f1cb8ea7fff71e9e",
+      "local_package": "0.48.002-rultra1"
+    },
+    "mihomo": {
+      "upstream_tag": "v1.19.33",
+      "asset_lock": "binary-assets.lock.json"
+    }
+  }
 }

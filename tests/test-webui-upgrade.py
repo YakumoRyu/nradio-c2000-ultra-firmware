@@ -18,6 +18,7 @@ class UpgradeTest(unittest.TestCase):
         m.installed=lambda:'Version: '+self.version+'\n'
         def run(args):
             if args[0]=='opkg':
+                self.assertNotIn('--force-confold',args,'OpenWrt opkg does not support the dpkg confold option')
                 new=args[-1].endswith('new.ipk');self.version='3.0.2-r3' if new else '3.0.2-r2';self.target.write_bytes(b'new' if new else b'old')
                 if new and self.fail:raise RuntimeError('injected opkg failure after writing files')
             return ''

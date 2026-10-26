@@ -1,0 +1,55 @@
+{
+  "passed": true,
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "openclash_upstream": "0.48.002",
+  "openclash_firmware_package": "0.48.002-rultra1",
+  "mihomo": "v1.19.33",
+  "official_download_digests_matched": true,
+  "configuration_and_routing_checks": {
+    "latest_plugin": true,
+    "latest_core": true,
+    "same_boot": true,
+    "enable_preserved": true,
+    "subscriptions_and_custom_files_preserved": true,
+    "same_runtime_rules": true,
+    "same_selected_groups": true,
+    "google": true,
+    "github": true,
+    "ipv4": true,
+    "ipv6": true,
+    "same_pcdn_bypass_sets": true
+  },
+  "runtime_code_files_identical_to_compiled_package": 118,
+  "runtime_monitor": {
+    "passed": true,
+    "seconds": 123.2,
+    "samples": 13,
+    "same_core_pid": true,
+    "same_boot": true,
+    "cpu_busy_min": 14.8,
+    "cpu_busy_max": 20.4,
+    "iowait_max": 0.6,
+    "available_mib_min": 156.8,
+    "available_mib_max": 212.1,
+    "backend_checks_ok": 13
+  },
+  "installer_tests": 5,
+  "browser_checks": {
+    "plugin_version_visible": true,
+    "core_version_visible": true,
+    "running_status_visible": true
+  },
+  "browser_errors": 0,
+  "private_configuration_included": false,
+  "release": "ultra-maintenance-20261026-2",
+  "format": "native opkg package and official core with rollback installer",
+  "supported_baselines": [
+    "OpenClash 0.47.156",
+    "OpenClash 0.48.002"
+  ],
+  "cumulative": false,
+  "final_archive_noop_on_live_router": true,
+  "reboot_required": false,
+  "temporary_storage": "TF card"
+}

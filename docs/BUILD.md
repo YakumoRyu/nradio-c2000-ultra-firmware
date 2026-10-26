@@ -33,6 +33,8 @@ node tests/test-v302-frontend.cjs
 5. 将`packages/ultra-port-manager`放入`package/custom`；将`overlay`放入`files`，使用`configs/ultra.config`，运行`make defconfig`。在打包根文件系统前，将`overlay/www/luci-static/resources/ultra-layout.css`追加到主题`www/luci-static/argon/css/cascade.css`，标记只保留一次。
 6. 准备`binary-assets.lock.json`记录的输入，完成依赖检查后构建完整镜像。
 
+OpenClash使用`packages/luci-app-openclash/Makefile`替换原feed中的同名配方，固定v0.48.002官方ipk及SHA-256，在构建时加入订阅弹窗标签兼容修复；Mihomo使用`binary-assets.lock.json`中的官方ARM64核心。该配方保留上游运行文件，独立修复记录在`scripts/patch-openclash-tabs.py`。代理升级与回退测试为`python3 tests/test-openclash-upgrade.py`。
+
 本仓库没有把 Docker、Mihomo、Cloudflared、规则库等大型二进制加入 Git。部分历史管理资源的来源与构建链仍需继续整理；当前完整发布镜像来自已验证的本地工程。GitHub Actions执行源码与协议回归，完整固件由本地工程构建并完成镜像审计。
 
 整固件打包后检查板型、FIT/DTB、内核模块 ABI、512 MiB 数据区布局、原登录模板、闭源驱动补丁、隐私和用户态执行，再完成真实设备验收。

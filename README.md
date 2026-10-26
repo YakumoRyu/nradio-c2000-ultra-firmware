@@ -8,22 +8,24 @@
 | 内核 | Linux6.12.103 |
 | 无线 | 联发科闭源驱动8.3.1.2 |
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r3 |
-| 完整固件 | ultra-25.12-20261026-r11 |
-| 升级包 | ultra-maintenance-20261026-1 |
+| OpenClash | v0.48.002，Ultra适配包0.48.002-rultra1 |
+| Mihomo | v1.19.33 |
+| 完整固件 | ultra-25.12-20261026-r12 |
+| 升级包 | ultra-maintenance-20261026-2 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [WebUI升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261026-1) | 将3.0.2-r2升级至r3，修复锁区后的扫频与网络恢复，保留配置，无需整机重启。 |
-| [完整r11固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261026-r11) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [OpenClash升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261026-2) | 更新OpenClash、Mihomo与LuCI兼容修复，保留配置，无需整机重启。 |
+| [完整r12固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261026-r12) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次修复锁定小区后的扫频拒绝、延迟AT应答误判和频率/ARFCN混用。扫描自动保存并恢复锁定和拨号，实机完成扫描与10分钟双栈连通验证；完整r11为整镜像待实机启动的预发布版本。此前Emby保护修复继续保留，验收记录见Release的VERIFICATION.json。
+本次更新OpenClash和Mihomo，修复新版订阅弹窗与当前LuCI的控件冲突。实机代理访问、双栈联网、原有策略和浏览器验收通过；完整r12为整镜像待实机启动的预发布版本。此前扫频、无线及Emby保护修复继续保留，验收记录见Release的VERIFICATION.json。
 
-完整固件约206MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
+完整固件约208MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261026-1/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261026-2/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)

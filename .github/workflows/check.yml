@@ -54,3 +54,4 @@ jobs:
       - run: node tests/test-v302-frontend.cjs
       - run: node tests/test-cellscan-frontend.cjs
       - run: python3 tests/test-webui-upgrade.py
+      - run: python3 tests/test-openclash-upgrade.py

@@ -8,7 +8,15 @@
       "sha256": "aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d",
       "official_digest_matched": true
     },
-    "passed": true
+    "passed": true,
+    "mihomo": {
+      "official_release": "v1.19.33",
+      "asset": "mihomo-linux-arm64-v1.19.33.gz",
+      "archive_sha256": "ba408b317080ee265c46cb923a50018c1b82cbd708551cdd46a1e3e307396187",
+      "bytes": 57475198,
+      "sha256": "8c73570d9a5f388bc2f58eee0b347ccfab84fb3cf1a0f8f2cf5eac7005fbcdc0",
+      "official_digest_matched": true
+    }
   },
   "excluded_overlay_inputs": [
     {
@@ -38,8 +46,8 @@
     {
       "path": "etc/openclash/core/clash_meta",
       "kind": "binary_asset",
-      "bytes": 57409662,
-      "sha256": "c80df2ca5159567804da883401e0118908fc1155e05df2baf3dbd4d3ecfc3754"
+      "bytes": 57475198,
+      "sha256": "8c73570d9a5f388bc2f58eee0b347ccfab84fb3cf1a0f8f2cf5eac7005fbcdc0"
     },
     {
       "path": "etc/wireless/mediatek/mt7992.1.dat",

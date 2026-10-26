@@ -35,5 +35,7 @@
   "cumulative": false,
   "final_archive_noop_on_live_router": true,
   "installation_preserves_config": true,
-  "reboot_required": false
+  "reboot_required": false,
+  "installer_revision": "20261026-opkg-options",
+  "opkg_arguments_verified_against_target_help": true
 }
