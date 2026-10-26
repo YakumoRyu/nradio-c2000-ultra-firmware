@@ -43,7 +43,8 @@ type scanPush struct {
 
 // isCellScan 判断是否为扫频命令（含打断伪命令）。
 func isCellScan(command string) bool {
-	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(command)), "AT^CELLSCAN")
+	v := strings.ToUpper(strings.TrimSpace(command))
+	return v == "AT^CELLSCAN" || strings.HasPrefix(v, "AT^CELLSCAN=") && v != "AT^CELLSCAN=?"
 }
 
 // isCellScanAbort 匹配打断伪命令 AT^CELLSCAN=ABORT。它不会下发给模组，
@@ -124,7 +125,7 @@ func (s *WSServer) runCellScan(command string) {
 	}
 	s.log.Infof("开始扫频: %s (超时 %s)", command, timeout)
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+140*time.Second)
 	defer cancel()
 
 	resp, err := s.client.SendLongCommand(ctx, command, timeout, s.onScanLine)
@@ -138,6 +139,8 @@ func (s *WSServer) runCellScan(command string) {
 	s.scan.mu.Unlock()
 
 	switch {
+	case err == context.Canceled && aborted:
+		s.Broadcast(wsPush{Type: "cellscan", Data: scanPush{State: "aborted", Lines: lines, Count: len(lines)}})
 	case err != nil:
 		s.log.Warnf("扫频失败: %v", err)
 		s.Broadcast(wsPush{Type: "cellscan", Data: scanPush{State: "error", Error: err.Error(), Lines: lines, Count: len(lines)}})

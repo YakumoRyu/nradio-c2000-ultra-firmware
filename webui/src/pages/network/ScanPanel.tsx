@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Input, Progress, Select, Space, Table, Tag, Toast, Typography } from '@douyinfe/semi-ui';
+import { Button, Input, Modal, Progress, Select, Space, Table, Tag, Toast, Typography } from '@douyinfe/semi-ui';
 import { ATService, type ATResponse } from '@/services/at';
 import { useATReady } from '@/hooks/useATReady';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -136,6 +136,14 @@ export const ScanPanel: React.FC<Props> = ({ onLock, onScanningChange, disabled 
       return;
     }
 
+    const confirmed = await new Promise<boolean>((resolve) => Modal.confirm({
+      title: '开始全网扫描',
+      content: '扫描会暂时断开5G并解除锁定，结束后自动恢复原设置和拨号。Wi-Fi保持连接。',
+      okText: '开始扫描', cancelText: '取消',
+      onOk: () => resolve(true), onCancel: () => resolve(false),
+    }));
+    if (!confirmed) return;
+
     setCells([]);
     setNote('');
     setScanning(true);
@@ -182,7 +190,7 @@ export const ScanPanel: React.FC<Props> = ({ onLock, onScanningChange, disabled 
         render: (value: number | null, record: ScanCell) =>
           value == null ? '—' : record.ratName === 'NR' ? `n${value}` : `B${value}`,
       },
-      { title: '频点', dataIndex: 'freq', render: (value: number | null) => value ?? '—' },
+      { title: '频点 ARFCN', dataIndex: 'freq', render: (value: number | null) => value ?? '—' },
       { title: 'PCI', dataIndex: 'pci', render: (value: number | null) => value ?? '—' },
       {
         title: '信号',
@@ -227,7 +235,7 @@ export const ScanPanel: React.FC<Props> = ({ onLock, onScanningChange, disabled 
   return (
     <PageCard
       title="全网扫频"
-      hint="模组直接扫出频段、频点、PCI 与子载波间隔，可据此一键锁定；支持无卡扫描。扫描期间模组被独占，其它操作请先取消。"
+      hint="扫描时暂时断开5G，结束或取消后自动恢复原锁定和拨号。结果中的ARFCN可用于一键锁定。"
       extra={
         <Space>
           {scanning ? (
@@ -271,7 +279,7 @@ export const ScanPanel: React.FC<Props> = ({ onLock, onScanningChange, disabled 
             onChange={(value) => setFilter((prev) => ({ ...prev, band: (value as string) || '' }))}
           />
         </Field>
-        <Field label="频点" hint="指定频点时必须选择接入技术">
+        <Field label="频点 ARFCN" hint="填写小区ARFCN；指定频点时必须选择接入技术">
           <Input
             disabled={scanning || !!filter.band}
             value={filter.freq}

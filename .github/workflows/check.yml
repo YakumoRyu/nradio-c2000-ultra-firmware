@@ -52,3 +52,5 @@ jobs:
       - run: npm run typecheck && npm run build
         working-directory: webui
       - run: node tests/test-v302-frontend.cjs
+      - run: node tests/test-cellscan-frontend.cjs
+      - run: python3 tests/test-webui-upgrade.py

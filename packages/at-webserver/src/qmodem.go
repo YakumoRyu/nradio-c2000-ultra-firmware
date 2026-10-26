@@ -20,18 +20,22 @@ const qmodemOwner = "at-webserver"
 
 type ubusCall func(context.Context, string, string, map[string]any) (map[string]any, error)
 type qmodemBackend struct {
-	port      string
-	modem     string
-	call      ubusCall
-	uci       func(context.Context) (string, error)
-	emit      func(unsolicited)
-	connected atomic.Bool
-	mapMu     sync.Mutex
-	checked   time.Time
-	smsMu     sync.Mutex
-	lastSync  time.Time
-	scanMu    sync.Mutex
-	scan      chan string
+	scanJournal    string
+	startScanGuard func(string) error
+	scanWait       func(context.Context, time.Duration) bool
+	port           string
+	modem          string
+	call           ubusCall
+	uci            func(context.Context) (string, error)
+	emit           func(unsolicited)
+	connected      atomic.Bool
+	mapMu          sync.Mutex
+	checked        time.Time
+	smsMu          sync.Mutex
+	lastSync       time.Time
+	scanMu         sync.Mutex
+	scan           chan string
+	scanCancel     context.CancelFunc
 }
 
 func newQModemBackend(port string, emit func(unsolicited)) *qmodemBackend {
@@ -180,6 +184,7 @@ func (q *qmodemBackend) handleEvent(raw json.RawMessage) {
 		Port        string `json:"port"`
 		Line        string `json:"raw_line"`
 		Correlation string `json:"correlation"`
+		CommandID   uint64 `json:"command_id"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
 		return
@@ -193,7 +198,7 @@ func (q *qmodemBackend) handleEvent(raw json.RawMessage) {
 		return
 	}
 	q.scanMu.Lock()
-	if q.scan != nil && (strings.HasPrefix(line, "^CELLSCAN:") || isTerminator(line)) {
+	if q.scan != nil && e.CommandID == 0 && (strings.HasPrefix(line, "^CELLSCAN:") || isTerminator(line)) {
 		select {
 		case q.scan <- line:
 		default:
@@ -259,7 +264,25 @@ func (q *qmodemBackend) lease(ctx context.Context, ttl int) (func(), error) {
 	if v["status"] != "success" || !ok {
 		return nil, errors.New("QModem AT port is busy")
 	}
+	renewCtx, stopRenew := context.WithCancel(context.Background())
+	go func() {
+		interval := time.Duration(ttl) * time.Second / 2
+		if interval < time.Second {
+			interval = time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				_, _ = q.call(renewCtx, "at-daemon", "lease_renew", map[string]any{"at_port": port, "owner": qmodemOwner, "token": token, "ttl": ttl})
+			}
+		}
+	}()
 	return func() {
+		stopRenew()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_, _ = q.call(ctx, "at-daemon", "lease_release", map[string]any{"at_port": port, "owner": qmodemOwner, "token": token})
@@ -294,15 +317,29 @@ func (q *qmodemBackend) submitSMS(ctx context.Context, command string) (ATRespon
 	return normalizedAT(raw, ""), nil
 }
 
-func (q *qmodemBackend) scanCommand(ctx context.Context, command string, timeout time.Duration, stream func(string)) (ATResponse, error) {
+func (q *qmodemBackend) scanCommand(ctx context.Context, command string, timeout time.Duration, stream func(string)) (response ATResponse, resultErr error) {
+	ctx, cancel := context.WithCancel(ctx)
+	q.scanMu.Lock()
+	q.scanCancel = cancel
+	q.scanMu.Unlock()
+	defer func() { cancel(); q.scanMu.Lock(); q.scanCancel = nil; q.scanMu.Unlock() }()
 	if timeout > 240*time.Second {
 		return ATResponse{}, errors.New("QModem scan timeout must be at most 240 seconds")
 	}
-	release, err := q.lease(ctx, int(timeout/time.Second)+10)
+	release, err := q.lease(ctx, 300)
 	if err != nil {
 		return ATResponse{}, err
 	}
 	defer release()
+	restore, err := q.prepareScan(ctx, timeout)
+	if err != nil {
+		return ATResponse{}, err
+	}
+	defer func() {
+		if err := restore(); err != nil {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
 	lines := make(chan string, maxResponseLines)
 	q.scanMu.Lock()
 	q.scan = lines
@@ -330,10 +367,27 @@ func (q *qmodemBackend) scanCommand(ctx context.Context, command string, timeout
 			}
 		case <-timer.C:
 			_ = q.interrupt("abcd")
+			q.drainScanEnd(lines)
 			return ATResponse{}, errors.New("Cell scan timed out")
 		case <-ctx.Done():
 			_ = q.interrupt("abcd")
+			q.drainScanEnd(lines)
 			return ATResponse{}, ctx.Err()
+		}
+	}
+}
+
+func (q *qmodemBackend) drainScanEnd(lines <-chan string) {
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case line := <-lines:
+			if isTerminator(line) {
+				return
+			}
+		case <-timer.C:
+			return
 		}
 	}
 }
@@ -341,7 +395,15 @@ func (q *qmodemBackend) scanCommand(ctx context.Context, command string, timeout
 func (q *qmodemBackend) interrupt(payload string) error {
 	q.scanMu.Lock()
 	active := q.scan != nil
+	preparingCancel := q.scanCancel
 	q.scanMu.Unlock()
+	if payload != cellScanAbortToken {
+		return errors.New("Invalid scan interrupt")
+	}
+	if !active && preparingCancel != nil {
+		preparingCancel()
+		return nil
+	}
 	if !active {
 		return errNoPendingCommand
 	}

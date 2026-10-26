@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "system": "25.12-SNAPSHOT",
+  "kernel": "6.12.103",
+  "webui": "3.0.2-r3",
+  "live_targeted_scan_success": true,
+  "original_locks_and_configs_restored": true,
+  "single_AT_owner_preserved": true,
+  "monitor": {
+    "complete": true,
+    "seconds": 600.0,
+    "samples": 61,
+    "http_ok": 61,
+    "ping4_ok": 61,
+    "ping6_ok": 61,
+    "boot_unchanged": true,
+    "min_available_mib": 178.4,
+    "valid_cell_samples": 21,
+    "target_cell_samples": 21,
+    "passed": true
+  },
+  "go_race_tests_passed": true,
+  "frontend_parser_tests": 11,
+  "installer_tests": 4,
+  "browser_checks": {
+    "live_scan_page": true,
+    "scan_button_available": true,
+    "outage_explained": true,
+    "cancel_without_scanning": true
+  },
+  "private_configuration_included": false,
+  "release": "ultra-maintenance-20261026-1",
+  "format": "native opkg package with verified installer and rollback package",
+  "supported_webui_baseline": "3.0.2-r2",
+  "cumulative": false,
+  "final_archive_noop_on_live_router": true,
+  "installation_preserves_config": true,
+  "reboot_required": false
+}

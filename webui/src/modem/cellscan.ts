@@ -17,6 +17,7 @@ export interface ScanCell {
   plmn: string;
   /** LTE/NR 下为频点（可直接用于锁频），GSM/WCDMA 下为该制式的频点 */
   freq: number | null;
+  frequencyKhz?: number | null;
   pci: number | null;
   /** 频段号，已从手册的十六进制换算成十进制；解析不出来时为 null */
   band: number | null;
@@ -64,6 +65,38 @@ const measure = (v: string, scale = 1): number | null => {
  */
 const MAX_BAND = 512;
 
+const nrRanges: Record<number, [number, number]> = {
+  1: [422000, 434000], 3: [361000, 376000], 5: [173800, 178800],
+  8: [185000, 192000], 28: [151600, 160600], 41: [499200, 537999],
+  77: [620000, 680000], 78: [620000, 653333], 79: [693334, 733333],
+};
+
+export const nrArfcnFromKhz = (khz: number): number | null => {
+  if (!Number.isFinite(khz) || khz < 0) return null;
+  const n = khz < 3000000 ? khz / 5 : khz < 24250080 ? 600000 + (khz - 3000000) / 15 : 2016667 + (khz - 24250080) / 60;
+  return Math.abs(n - Math.round(n)) < 1e-6 && n <= 3279165 ? Math.round(n) : null;
+};
+
+function scanChannel(rat: number, band: number | null, fields: string[]): { freq: number | null; frequencyKhz: number | null } {
+  const reported = dec(fields[2]);
+  const explicit = fields.length > 15 ? dec(fields[15]) : null;
+  const limit = rat === 3 ? 3279165 : 262143;
+  if ((rat === 2 || rat === 3) && explicit != null && Number.isInteger(explicit) && explicit >= 0 && explicit <= limit) {
+    return { freq: explicit, frequencyKhz: reported };
+  }
+  if (reported == null || !Number.isInteger(reported)) return { freq: null, frequencyKhz: null };
+  if (rat === 3) {
+    const range = band == null ? undefined : nrRanges[band];
+    // Older responses report the channel in field 3; B025 adds it in field 16.
+    if (range && reported >= range[0] && reported <= range[1]) return { freq: reported, frequencyKhz: null };
+    const channel = nrArfcnFromKhz(reported);
+    if (channel != null && range && channel >= range[0] && channel <= range[1]) return { freq: channel, frequencyKhz: reported };
+    return { freq: null, frequencyKhz: reported };
+  }
+  if (rat === 2) return { freq: reported <= limit ? reported : null, frequencyKhz: reported > limit ? reported : null };
+  return { freq: reported, frequencyKhz: null };
+}
+
 const parseBand = (v: string): number | null => {
   const n = hex(v);
   if (n === null || n <= 0 || n > MAX_BAND) return null;
@@ -84,14 +117,16 @@ export const parseScanLine = (line: string): ScanCell | null => {
 
   const rat = dec(f[0]);
   if (rat === null || !(rat in RAT_NAMES)) return null;
+  const band = parseBand(f[4]);
+  const channel = scanChannel(rat, band, f);
 
   return {
     rat: rat as ScanRat,
     ratName: RAT_NAMES[rat],
     plmn: f[1].replace(/"/g, ''),
-    freq: dec(f[2]),
+    ...channel,
     pci: dec(f[3]),
-    band: parseBand(f[4]),
+    band,
     lac: f[5].trim(),
     cid: f[6].trim(),
     rxlev: dec(f[7]),

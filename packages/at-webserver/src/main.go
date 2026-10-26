@@ -16,10 +16,19 @@ var version = "dev"
 
 func main() {
 	var (
-		showVersion = flag.Bool("version", false, "打印版本后退出")
-		verbose     = flag.Bool("verbose", false, "保持 debug 级别日志")
+		showVersion  = flag.Bool("version", false, "打印版本后退出")
+		verbose      = flag.Bool("verbose", false, "保持 debug 级别日志")
+		scanRecovery = flag.String("scan-recovery", "", "恢复扫描前的模组设置")
+		scanWatchdog = flag.Bool("scan-watchdog", false, "等待扫描进程或超时后恢复")
 	)
 	flag.Parse()
+	if *scanRecovery != "" {
+		if err := recoverScanFile(*scanRecovery, *scanWatchdog); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *showVersion {
 		fmt.Printf("at-webserver %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
@@ -54,6 +63,11 @@ func run(log *Logger, verbose bool) error {
 	logConfig(log, cfg)
 
 	client := NewATClient(cfg.AT, log)
+	if client.q != nil {
+		if err := recoverScanFile(scanJournalPath, false); err != nil {
+			return fmt.Errorf("恢复上次扫描: %w", err)
+		}
+	}
 	ws := NewWSServer(client, cfg.WebSocket.AuthKey, log)
 	notifier := NewNotifier(cfg.Notification, log)
 	dispatcher := NewDispatcher(client, notifier, ws, log)

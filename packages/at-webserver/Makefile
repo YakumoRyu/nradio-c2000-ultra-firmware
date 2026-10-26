@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=at-webserver
 PKG_VERSION:=3.0.2
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_LICENSE:=MIT
 PKG_BUILD_DEPENDS:=golang/host

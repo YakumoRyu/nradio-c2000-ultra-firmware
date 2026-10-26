@@ -150,22 +150,11 @@ func TestNormalCommandsThroughUBus(t *testing.T) {
 	}
 }
 func TestLongScanUsesLeaseAndEvents(t *testing.T) {
-	q, _ := testQModem()
-	calls := []string{}
-	q.call = func(_ context.Context, _, m string, p map[string]any) (map[string]any, error) {
-		calls = append(calls, m)
-		if m == "lease_acquire" {
-			return map[string]any{"status": "success", "token": "synthetic"}, nil
-		}
-		if m == "sendat" {
-			q.handleEvent(json.RawMessage(`{"port":"/dev/mock","raw_line":"^CELLSCAN: synthetic","correlation":"idle"}`))
-			q.handleEvent(json.RawMessage(`{"port":"/dev/mock","raw_line":"OK","correlation":"idle"}`))
-		}
-		return map[string]any{"status": "success"}, nil
-	}
+	m := scanRig(t)
+	q := m.q
 	stream := []string{}
 	r, e := q.exchange(context.Background(), "AT^CELLSCAN=0", time.Second, func(s string) { stream = append(stream, s) })
-	if e != nil || !r.OK() || len(stream) != 2 || len(calls) != 3 || calls[2] != "lease_release" {
-		t.Fatal(r, e, stream, calls)
+	if e != nil || !r.OK() || len(stream) != 2 || m.commands[0] != "LEASE" || m.commands[len(m.commands)-1] != "RELEASE" {
+		t.Fatal(r, e, stream, m.commands)
 	}
 }

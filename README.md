@@ -7,23 +7,23 @@
 | 系统 | ImmortalWrt25.12-SNAPSHOT |
 | 内核 | Linux6.12.103 |
 | 无线 | 联发科闭源驱动8.3.1.2 |
-| 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r2 |
-| 完整固件 | ultra-25.12-20261023-r10 |
-| 升级包 | ultra-maintenance-20261023-3 |
+| 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r3 |
+| 完整固件 | ultra-25.12-20261026-r11 |
+| 升级包 | ultra-maintenance-20261026-1 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [维护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261023-3) | 在r4/r5/r6/r7/r8/r9基线上安装17文件累计修复，保留配置。r9只更新媒体保护程序。 |
-| [完整r10固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261023-r10) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [WebUI升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261026-1) | 将3.0.2-r2升级至r3，修复锁区后的扫频与网络恢复，保留配置，无需整机重启。 |
+| [完整r11固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261026-r11) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次修复Docker停止超时后，把延迟退出的容器误判为已恢复的问题。保护程序区分停止与启动阶段，实机通过恢复队列启动Emby；完整r10为整镜像待实机启动的预发布版本。业务和资源验收记录见Release的VERIFICATION.json。
+本次修复锁定小区后的扫频拒绝、延迟AT应答误判和频率/ARFCN混用。扫描自动保存并恢复锁定和拨号，实机完成扫描与10分钟双栈连通验证；完整r11为整镜像待实机启动的预发布版本。此前Emby保护修复继续保留，验收记录见Release的VERIFICATION.json。
 
 完整固件约206MiB，可选软件仓库约144MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261023-3/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261026-1/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)
@@ -31,6 +31,8 @@
 - [项目记忆](docs/PROJECT_MEMORY.md)
 
 ## 已集成的改动
+
+- **锁区后扫频**：临时解除锁定、等待无线空闲、异步接收结果，结束或异常退出自动恢复原网络；锁区使用正确ARFCN。
 
 - **媒体资源保护**：Docker超时继续监测，分步恢复、跨重启保存保护目标，Emby采用320MiB回收水位及384MiB硬限制，保留后台追赶分析。
 - **号码与短信**：正确解析SIM号码，短信管理统一到巴龙WebUI，保留PushPlus和QModem后台。
