@@ -22,6 +22,8 @@ jobs:
       - run: python3 tests/test-cell-preference.py
       - run: python3 tests/test-cell-preference-upgrade.py
       - run: python3 tests/test-pcdn-whitelist.py
+      - run: python3 tests/test-wan-recovery.py
+      - run: python3 tests/test-wan-recovery-upgrade.py
       - run: sh -n overlay/etc/uci-defaults/99-pcdn-whitelist
       - run: sh -n overlay/etc/uci-defaults/98-cell-preference
       - run: python3 tests/test-cpu-hotfix.py

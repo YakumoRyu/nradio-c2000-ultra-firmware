@@ -1,0 +1,72 @@
+{
+  "passed": true,
+  "kernel": "6.12.103",
+  "policy_tests": 10,
+  "installer_tests": 4,
+  "WAN_change_window_seconds": 900,
+  "confirmation_failures": 3,
+  "cooldown_seconds": 1800,
+  "recovery_groups": [
+    "ordinary_selection",
+    "foreign_AI"
+  ],
+  "game_only_selection_excluded": true,
+  "recovery_rate_limits_and_resource_checks_retained": true,
+  "original_AI_coverage_gap_reproduced_without_live_fault_injection": true,
+  "runtime_core_restarted": false,
+  "runtime_modem_redialed": false,
+  "all_configuration_files_preserved": true,
+  "runtime": {
+    "samples": 15,
+    "elapsed_seconds": 311,
+    "same_boot": true,
+    "same_core_pid": true,
+    "min_available_mib": 135.10546875,
+    "node_probe_count": 45,
+    "node_probe_failures": [],
+    "applications": [
+      {
+        "host": "www.google.com",
+        "rc": 0,
+        "result": "204 0.415616",
+        "ok": true
+      },
+      {
+        "host": "github.com",
+        "rc": 0,
+        "result": "200 1.256331",
+        "ok": true
+      },
+      {
+        "host": "login.microsoftonline.com",
+        "rc": 0,
+        "result": "200 1.367937",
+        "ok": true
+      },
+      {
+        "host": "www.google.com",
+        "rc": 0,
+        "result": "204 0.784363",
+        "ok": true
+      },
+      {
+        "host": "github.com",
+        "rc": 0,
+        "result": "200 2.483434",
+        "ok": true
+      },
+      {
+        "host": "login.microsoftonline.com",
+        "rc": 0,
+        "result": "200 1.125021",
+        "ok": true
+      }
+    ]
+  },
+  "initial_transport_timeout_trigger_confirmed": false,
+  "private_configuration_included": false,
+  "release": "ultra-maintenance-20261102-2",
+  "payload_files": 1,
+  "reboot_required": false,
+  "final_archive_noop_on_live_router": true
+}

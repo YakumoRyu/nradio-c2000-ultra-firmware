@@ -54,3 +54,5 @@ CPU维护更新的回归使用`python3 tests/test-usb-watchdog.py`、`lua5.1 tes
 邻区信号优先策略位于`overlay/usr/libexec/cell-preference`，配置为`overlay/etc/config/cell_preference`，由`98-cell-preference`安装一分钟检查入口。运行`python3 tests/test-cell-preference.py`和`python3 tests/test-cell-preference-upgrade.py`验证选择门限、样本时序、恢复和配置保留。该策略通过共享AT服务运行，不添加串口持有者。
 
 PCDN转发白名单由`overlay/usr/libexec/pcdn_whitelist.py`提供，复用`pcdn-ipv6-access`的地址采集及定时任务，`99-pcdn-whitelist`安装OpenClash重建回调。运行`python3 tests/test-pcdn-whitelist.py`验证设备范围、IPv4映射限制、IPv6地址选择、链优先级、计数保留及安装回退。升级归档使用`scripts/ultra-signal-pcdn-upgrade.py`作为入口，调用两个独立安装器；公开默认配置不包含设备MAC或首选频点。
+
+WAN恢复检测由`overlay/usr/libexec/openclash-wan-recover`提供。运行`python3 tests/test-wan-recovery.py`验证普通代理与国外AI覆盖、去重、游戏隔离及恢复门限；`python3 tests/test-wan-recovery-upgrade.py`验证单文件升级、重复应用、回退和个人配置保留。升级归档采用`scripts/ultra-wan-recovery-upgrade.py`，不触发实时核心重启。

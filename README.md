@@ -10,24 +10,24 @@
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r3 |
 | OpenClash | v0.48.002，Ultra适配包0.48.002-rultra1 |
 | Mihomo | v1.19.33 |
-| 完整固件 | ultra-25.12-20261102-r13 |
-| 升级包 | ultra-maintenance-20261102-1 |
+| 完整固件 | ultra-25.12-20261102-r14 |
+| 升级包 | ultra-maintenance-20261102-2 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [信号重选与PCDN白名单升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261102-1) | 首选频点、邻区选择与PCDN转发放行，保留配置，无需整机重启。 |
-| [完整r13固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261102-r13) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [美国代理恢复检测升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261102-2) | 补上“国外AI”所选美国节点的检测，保留配置，无需整机重启。 |
+| [完整r14固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261102-r14) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次增加保持联网的邻区信号优先策略：每分钟读取实时邻区，连续3次强至少6dB且质量合格才请求选择，30分钟冷却，未确认选择时恢复原设置。无需离网扫频或切飞行模式。完整r13将相同逻辑编入ROM，保持原内核、无线和既有修复；整镜像待实机启动验收。
+本次修正WAN变化后的代理恢复检测：同时检查“节点选择”和“国外AI”的实际Mieru出站，避免日本正常时漏掉美国节点超时。保留连续确认、15分钟恢复窗口、资源检查和30分钟冷却，不改变原有策略组选择。完整r14将同一修正编入ROM，整镜像待实机启动验收。
 
 PCDN白名单按设备MAC及LAN接口匹配，优先于OpenClash全局过滤，支持动态公网IPv6。保留NAT、UPnP与其他设备的防火墙策略，公共出厂配置默认关闭。
 
 完整固件约208MiB，可选软件仓库约146MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261102-1/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261102-2/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)

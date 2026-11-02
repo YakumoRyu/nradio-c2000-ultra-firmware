@@ -17,6 +17,7 @@ EVENT = Path('/tmp/openclash-wan-event')
 SETTLE, WINDOW, INTERVAL, COOLDOWN = 60, 900, 55, 1800
 MAIN_GROUP = '\U0001f680 节点选择'
 GAME_GROUP = '\U0001f3ae 海外游戏'
+AI_GROUP = '\U0001f916 国外AI'
 
 
 def command(args, timeout=5):
@@ -92,23 +93,32 @@ class Runtime:
 
     def proxy(self):
         proxies = self.api('/proxies')['proxies']
-        name, kind = selected_leaf(proxies, MAIN_GROUP)
         game_name, _ = selected_leaf(proxies, GAME_GROUP)
-        if kind != 'Mieru' or name == game_name:
+        targets = []
+        for group in (MAIN_GROUP, AI_GROUP):
+            name, kind = selected_leaf(proxies, group)
+            if kind == 'Mieru' and name != game_name and name not in targets:
+                targets.append(name)
+        if not targets:
             return None, {'reason': 'non_mieru_or_game_only_selection'}
         results = []
-        for url in ('https://www.google.com/generate_204', 'https://www.gstatic.com/generate_204'):
-            path = '/proxies/' + urllib.parse.quote(name, safe='') + '/delay?'
-            path += urllib.parse.urlencode({'url': url, 'timeout': 5000})
-            try:
-                result = self.api(path)
-                ok = isinstance(result.get('delay'), (int, float)) and result['delay'] >= 0
-                results.append({'host': urllib.parse.urlsplit(url).hostname, 'delay_ms': result.get('delay'), 'ok': ok})
+        for name in targets:
+            ok = False
+            for url in ('https://www.google.com/generate_204', 'https://www.gstatic.com/generate_204'):
+                path = '/proxies/' + urllib.parse.quote(name, safe='') + '/delay?'
+                path += urllib.parse.urlencode({'url': url, 'timeout': 5000})
+                try:
+                    result = self.api(path)
+                    delay = result.get('delay')
+                    ok = isinstance(delay, (int, float)) and not isinstance(delay, bool) and delay > 0
+                    results.append({'node': name, 'host': urllib.parse.urlsplit(url).hostname, 'delay_ms': delay, 'ok': ok})
+                except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                    results.append({'node': name, 'host': urllib.parse.urlsplit(url).hostname, 'error': type(exc).__name__})
                 if ok:
-                    return True, {'node': name, 'results': results}
-            except (urllib.error.URLError, TimeoutError, OSError) as exc:
-                results.append({'host': urllib.parse.urlsplit(url).hostname, 'error': type(exc).__name__})
-        return False, {'node': name, 'results': results}
+                    break
+            if not ok:
+                return False, {'node': name, 'nodes': targets, 'results': results}
+        return True, {'node': targets[0], 'nodes': targets, 'results': results}
 
     def safe_resources(self):
         mem = {x.split(':')[0]: int(x.split()[1]) for x in Path('/proc/meminfo').read_text().splitlines()}
