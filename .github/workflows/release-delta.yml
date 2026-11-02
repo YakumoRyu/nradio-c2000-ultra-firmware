@@ -14,7 +14,7 @@ jobs:
         with:
           persist-credentials: false
       - run: sudo apt-get update -qq && sudo apt-get install -y bsdiff
-      - run: python3 .github/scripts/release_delta_assets.py release-deltas/20261026-r12/manifest.json
+      - run: python3 .github/scripts/release_delta_assets.py release-deltas/20261102-r13/manifest.json
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

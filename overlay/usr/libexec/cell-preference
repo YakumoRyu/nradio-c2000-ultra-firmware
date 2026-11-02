@@ -1,0 +1,258 @@
+#!/usr/bin/python3
+"""Prefer consistently stronger measured NR neighbors through the shared AT owner."""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+STATE=Path('/tmp/cell-preference.json')
+HISTORY=Path('/overlay/cell-preference')
+SCAN=Path('/overlay/at-webserver/scan-session.json')
+RUNTIME_LOCK=Path('/tmp/cell-preference.lock')
+
+def run(args,timeout=12):
+    p=subprocess.run(args,capture_output=True,text=True,timeout=timeout)
+    if p.returncode:raise RuntimeError('command_failed:'+args[0])
+    return p.stdout
+
+def config():
+    raw=run(['uci','-q','show','cell_preference.main'],5)
+    values={}
+    for line in raw.splitlines():
+        key,sep,value=line.partition('=')
+        if sep:values[key.rsplit('.',1)[-1]]=value.strip("'")
+    return values
+
+def checked_config(values):
+    limits={'gain_db':(3,20,6),'samples':(2,10,3),'cooldown_seconds':(600,86400,1800),'min_sinr_db':(-5,20,0),'max_sinr_loss_db':(0,6,3),'max_rsrq_loss_db':(0,6,3)}
+    result=dict(values)
+    for key,(low,high,default) in limits.items():
+        value=int(values.get(key,default))
+        if not low<=value<=high:raise ValueError('invalid_'+key)
+        result[key]=value
+    port=values.get('at_port','/dev/ttyUSB1')
+    if not re.fullmatch('/dev/ttyUSB[0-9]{1,2}',port):raise ValueError('invalid_at_port')
+    result['at_port']=port
+    result['preferred_arfcn']=int(values.get('preferred_arfcn','0'))
+    if not 0<=result['preferred_arfcn']<=4294967295:raise ValueError('invalid_preferred_arfcn')
+    result['preferred_scs']=int(values.get('preferred_scs','1'))
+    if result['preferred_scs'] not in range(5):raise ValueError('invalid_preferred_scs')
+    return result
+
+def at(port,command):
+    text=run(['/usr/libexec/qmodem-at-ubus',port,command])
+    lines=[line.strip() for line in text.splitlines() if line.strip()]
+    if 'OK' not in lines or any(line=='ERROR' or line.startswith('+CME ERROR') for line in lines):
+        raise RuntimeError('at_request_failed')
+    return text
+
+def lock_command(raw):
+    lines=[line.strip() for line in raw.splitlines() if line.strip() and line.strip()!='OK']
+    header=next((i for i,x in enumerate(lines) if x.startswith('^NRFREQLOCK:')),None)
+    if header is None:raise ValueError('invalid_lock_reply')
+    mode=int(lines[header].split(':',1)[1])
+    if mode==0:return 'AT^NRFREQLOCK=0'
+    if mode not in (1,2,3):raise ValueError('invalid_lock_type')
+    mobility,count=map(int,lines[header+1].split(','))
+    if mobility not in (0,1) or not 1<=count<=20:raise ValueError('invalid_lock_count')
+    columns=[]
+    for row in lines[header+2:header+2+count]:
+        fields=row.split(',')
+        if len(fields)!={1:3,2:4,3:1}[mode] or any(not re.fullmatch(r'[0-9]+',field) for field in fields):raise ValueError('invalid_lock_fields')
+        columns.append(fields)
+    if len(columns)!=count:raise ValueError('incomplete_lock_reply')
+    return f'AT^NRFREQLOCK={mode},{mobility},{count}'+''.join(',"'+','.join(row[i] for row in columns)+'"' for i in range(len(columns[0])))
+
+def valid_signal(row):
+    return -140<=row['rsrp']<=-30 and -30<=row['rsrq']<=0 and -24<=row['sinr']<=50
+
+def serving(raw):
+    match=re.search(r'\^MONSC:\s*NR,([^\r\n]+)',raw)
+    if not match:raise ValueError('no_serving_nr_cell')
+    fields=match[1].split(',')
+    if len(fields)<10:raise ValueError('incomplete_serving_cell')
+    row={'mcc':fields[0],'mnc':fields[1],'arfcn':int(fields[2]),'scs':int(fields[3]),'nci':fields[4],'pci':int(fields[5],16),'rsrp':int(fields[7]),'rsrq':int(fields[8]),'sinr':int(fields[9])}
+    if row['scs'] not in range(5) or not 0<=row['pci']<=1007 or not valid_signal(row):raise ValueError('invalid_serving_cell')
+    return row
+
+def neighbors(raw,current):
+    rows=[]
+    for line in raw.splitlines():
+        match=re.fullmatch(r'\s*\^MONNC:\s*NR,(\d+),([0-9A-Fa-f]+),(-?\d+),(-?\d+),(-?\d+)\s*',line)
+        if not match:continue
+        freq,pci,power,quality,sinr=match.groups()
+        row={'arfcn':int(freq),'scs':current['scs'],'pci':int(pci,16),'rsrp':int(power),'rsrq':int(quality),'sinr':int(sinr)}
+        # MONNC supplies no PLMN or SCS for another frequency; do not infer them.
+        if row['arfcn']!=current['arfcn'] or not 0<=row['pci']<=1007 or not valid_signal(row):continue
+        if row['pci']==current['pci']:continue
+        rows.append(row)
+    return rows
+
+def band_for_frequency(freq):
+    if 620000<=freq<=653333:return 78
+    if 499200<=freq<=537999:return 41
+    if 151600<=freq<=160600:return 28
+    if 422000<=freq<=434000:return 1
+    if 693334<=freq<=733333:return 79
+    if 361000<=freq<=376000:return 3
+    if 173800<=freq<=178800:return 5
+    if 185000<=freq<=192000:return 8
+    raise ValueError('unsupported_frequency')
+
+def key(row):return f"{row['arfcn']}:{row['scs']}:{row['pci']}"
+
+def decide(current,candidates,state,cfg,now):
+    result=dict(state)
+    if now<state.get('observed',now) or now-state.get('observed',now)>150:
+        result.pop('candidate',None);result['count']=0
+    result['observed']=now;result['current']=dict(current)
+    eligible=[row for row in candidates if row['rsrp']-current['rsrp']>=cfg['gain_db'] and row['sinr']>=cfg['min_sinr_db'] and row['sinr']>=current['sinr']-cfg['max_sinr_loss_db'] and row['rsrq']>=current['rsrq']-cfg['max_rsrq_loss_db']]
+    if not eligible:
+        preferred=cfg.get('preferred_arfcn',0)
+        phase='preferred_frequency_active' if preferred and current['arfcn']==preferred else 'current_best_observed'
+        if preferred and current['arfcn']!=preferred:phase='preferred_frequency_unavailable'
+        result.update(phase=phase,candidate=None,count=0,preferred_arfcn=preferred)
+        return result,None
+    best=max(eligible,key=lambda row:(row['rsrp'],row['sinr'],row['rsrq']))
+    if state.get('current') and key(state['current'])!=key(current):result.update(candidate=None,count=0)
+    if result.get('candidate')==key(best):
+        if now-result.get('candidate_sample_at',0)>=45:
+            result['count']=result.get('count',0)+1;result['candidate_sample_at']=now
+    else:result.update(candidate=key(best),count=1,candidate_sample_at=now)
+    result['better_neighbor']=best
+    attempt=state.get('last_attempt',0)
+    if now<attempt or now-attempt<cfg['cooldown_seconds']:
+        result['phase']='cooldown';return result,None
+    if result['count']<cfg['samples']:
+        result['phase']='confirming_better_neighbor';return result,None
+    result.update(phase='ready',count=0)
+    return result,best
+
+def atomic(path,value):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    stage=path.with_suffix('.new');stage.write_text(json.dumps(value,ensure_ascii=False),encoding='utf-8');stage.chmod(0o600);os.replace(stage,path)
+
+def load(path):
+    try:return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError,ValueError):return {}
+
+def internet_ok():
+    families=[([],['223.5.5.5','119.29.29.29'])]
+    if run(['ip','-6','route','show','default'],5).strip():families.append((['-6'],['2400:3200::1','2402:4e00::']))
+    for flags,targets in families:
+        reachable=False
+        for target in targets:
+            p=subprocess.run(['ping',*flags,'-I','eth2','-c','1','-W','2',target],capture_output=True,timeout=4)
+            if p.returncode==0:reachable=True;break
+        if not reachable:return False
+    return True
+
+def select_cell(current,target,cfg,baseline,probe=None):
+    probe=probe or internet_ok
+    if not probe():return 'network_not_ready',baseline
+    band=band_for_frequency(target['arfcn'])
+    mobility=0 if cfg.get('preferred_arfcn',0) else 1
+    command=f'AT^NRFREQLOCK=2,{mobility},1,"{band}","{target["arfcn"]}","{target["scs"]}","{target["pci"]}"'
+    journal={'epoch':time.time(),'baseline':baseline,'requested':command,'target':target}
+    atomic(HISTORY/'pending.json',journal)
+    try:
+        at(cfg['at_port'],command)
+        if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))!=command:raise RuntimeError('lock_not_accepted')
+        # Passive mode never resets the radio or interrupts data to force selection.
+        for _ in range(3):
+            time.sleep(3)
+            observed=serving(at(cfg['at_port'],'AT^MONSC'))
+            if key(observed)==key(target) and observed['rsrp']-current['rsrp']>=cfg['gain_db'] and probe():
+                journal.update(confirmed=observed,finished=time.time());atomic(HISTORY/'last-selection.json',journal)
+                (HISTORY/'pending.json').unlink();return 'selected',command
+        raise RuntimeError('modem_did_not_select_requested_neighbor')
+    except Exception:
+        at(cfg['at_port'],baseline)
+        if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))!=baseline:raise RuntimeError('restore_not_confirmed')
+        (HISTORY/'pending.json').unlink()
+        return 'original_setting_restored',baseline
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check',action='store_true')
+    parser.add_argument('--enable-auto',action='store_true')
+    args=parser.parse_args()
+    cfg=checked_config(config())
+    if cfg.get('enabled')!='1' and not args.enable_auto:return
+    with open(RUNTIME_LOCK,'a') as guard:
+        try:fcntl.flock(guard,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return
+        SCAN.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        with open(str(SCAN)+'.lock','a') as scanlock:
+            try:fcntl.flock(scanlock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:return
+            if SCAN.exists():return
+            state=load(STATE)
+            state['last_attempt']=max(state.get('last_attempt',0),load(HISTORY/'last-attempt.json').get('epoch',0))
+            baseline=lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))
+            pending=load(HISTORY/'pending.json')
+            if pending:
+                if baseline==pending.get('requested'):
+                    at(cfg['at_port'],pending['baseline'])
+                    if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))!=pending['baseline']:raise RuntimeError('pending_restore_not_confirmed')
+                (HISTORY/'pending.json').unlink()
+                atomic(STATE,{'phase':'interrupted_selection_recovered','last_attempt':time.time()});return
+            if args.enable_auto:
+                # Explicit entry into automatic mode retires an old frequency/cell lock.
+                # Ordinary scheduled checks never clear a manual lock on their own.
+                requested='AT^NRFREQLOCK=0'
+                if cfg['preferred_arfcn']:
+                    band=band_for_frequency(cfg['preferred_arfcn'])
+                    requested=f'AT^NRFREQLOCK=1,0,1,"{band}","{cfg["preferred_arfcn"]}","{cfg["preferred_scs"]}"'
+                transition={'epoch':time.time(),'baseline':baseline,'requested':requested,'automatic_mode':True}
+                atomic(HISTORY/'pending.json',transition)
+                atomic(HISTORY/('before-auto-'+str(time.time_ns())+'.json'),transition)
+                try:
+                    if baseline!=requested:at(cfg['at_port'],requested)
+                    if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))!=requested:raise RuntimeError('auto_mode_not_confirmed')
+                    run(['uci','set','cell_preference.main.enabled=1'],5);run(['uci','commit','cell_preference'],5)
+                except Exception:
+                    at(cfg['at_port'],baseline)
+                    if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))==baseline:(HISTORY/'pending.json').unlink()
+                    raise
+                (HISTORY/'pending.json').unlink()
+                baseline=requested
+                state={'expected_lock':baseline,'last_attempt':state.get('last_attempt',0)}
+            if state.get('expected_lock') and state['expected_lock']!=baseline:
+                atomic(STATE,state|{'phase':'manual_lock_changed','observed':time.time()});return
+            raw=at(cfg['at_port'],'AT^MONSC')
+            try:
+                current=serving(raw)
+            except ValueError as error:
+                if str(error)!='no_serving_nr_cell':raise
+                now=time.time();sample_at=state.get('no_nr_sample_at',0)
+                failures=state.get('no_nr_samples',0)
+                if now<sample_at or now-sample_at>150:failures=0
+                if now-sample_at>=45 or failures==0:failures+=1;sample_at=now
+                state.update(no_nr_samples=failures,no_nr_sample_at=sample_at,candidate=None,count=0,phase='waiting_for_nr_service',observed=now)
+                previous=load(HISTORY/'last-selection.json')
+                if failures>=3 and previous.get('requested')==baseline and not args.check:
+                    at(cfg['at_port'],previous['baseline'])
+                    if lock_command(at(cfg['at_port'],'AT^NRFREQLOCK?'))!=previous['baseline']:raise RuntimeError('fallback_restore_not_confirmed')
+                    state.update(phase='previous_setting_restored_after_service_loss',expected_lock=previous['baseline'],last_attempt=time.time())
+                    atomic(HISTORY/'last-attempt.json',{'epoch':state['last_attempt']})
+                atomic(STATE,state);return
+            cells=neighbors(at(cfg['at_port'],'AT^MONNC'),current)
+            result,target=decide(current,cells,state,cfg,time.time())
+            result['no_nr_samples']=0
+            result['expected_lock']=baseline
+            if target and not args.check:
+                result['last_attempt']=time.time();atomic(HISTORY/'last-attempt.json',{'epoch':result['last_attempt']});atomic(STATE,result)
+                result['phase'],result['expected_lock']=select_cell(current,target,cfg,baseline)
+            atomic(STATE,result)
+            if args.check or args.enable_auto:print(json.dumps(result,ensure_ascii=False))
+
+if __name__=='__main__':
+    try:main()
+    except Exception as error:
+        message=type(error).__name__
+        atomic(STATE,load(STATE)|{'phase':'check_failed','error':message,'candidate':None,'count':0,'observed':time.time()})

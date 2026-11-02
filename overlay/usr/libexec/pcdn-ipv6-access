@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Permit PCDN IPv6 service ports only for learned, current-prefix client addresses."""
+"""Refresh current-prefix PCDN service access and the optional device whitelist."""
 import fcntl,ipaddress,json,os,subprocess,sys,time
 from pathlib import Path
 from pcdn_settings import config,enabled,macs,valid_name
@@ -39,11 +39,16 @@ def collect():
 def atomic(path,text):
  temp=path.with_suffix('.tmp');temp.write_text(text);os.chmod(temp,0o600);os.replace(temp,path)
 def main():
- if not enabled(config()):return
+ settings=config()
  with open('/tmp/pcdn-ipv6-access.lock','w') as lock:
   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:return
-  clients=collect();ips=sorted(clients)
+  if not enabled(settings):
+   if '--prepare' not in sys.argv:
+    from pcdn_whitelist import refresh
+    refresh(settings,{})
+   return
+  clients=collect() if enabled(settings) else {};ips=sorted(clients)
   atomic(LIST,'\n'.join(ips)+'\n' if ips else '')
   if '--prepare' not in sys.argv:
    # One nft transaction avoids a partially applied address set.
@@ -51,5 +56,9 @@ def main():
    if ips:script+='add element inet fw4 '+SET+' { '+', '.join(ips)+' }\n'
    p=subprocess.run(['nft','-f','-'],input=script,text=True,capture_output=True,timeout=8)
    if p.returncode:raise RuntimeError('PCDN IPv6 nft set update failed')
-  atomic(STATE,json.dumps({'epoch':time.time(),'clients':clients,'ports':'TCP/UDP 1024-65535','rule_scope':'PCDN current public IPv6 addresses only'}))
+  whitelist=None
+  if '--prepare' not in sys.argv:
+   from pcdn_whitelist import refresh
+   whitelist=refresh(settings,clients)
+  atomic(STATE,json.dumps({'epoch':time.time(),'clients':clients,'ports':'all' if whitelist and whitelist['enabled'] else 'TCP/UDP 1024-65535','rule_scope':'PCDN current public IPv6 addresses only','firewall_whitelist':whitelist}))
 if __name__=='__main__':main()

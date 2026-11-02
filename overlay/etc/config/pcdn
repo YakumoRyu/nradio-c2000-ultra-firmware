@@ -1,4 +1,5 @@
 config support 'main'
 	option enabled '0'
+	option firewall_whitelist '0'
 	option isolated_network 'pcdn1'
 	option upstream '2_1v6'

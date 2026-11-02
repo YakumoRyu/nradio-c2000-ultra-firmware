@@ -50,3 +50,7 @@ CPU维护更新的回归使用`python3 tests/test-usb-watchdog.py`、`lua5.1 tes
 网口、AT字段和显示升级工具的回归分别为`tests/test-ultra-ports.py`、`tests/test-modem-fields.py`、`tests/test-modem-fields.lua`及`tests/test-ui-hotfix.py`。Lua用5.1运行；网口事务测试可通过`UCI_RUNNER`指定实际目标UCI的JSON参数列表，其余协议测试独立执行。
 
 号码/SMS维护补丁为`patches/qmodem/0003-huawei-subscriber-number-and-lte-sinr.patch`，应用在0001/0002之后，包含QModem及短信LuCI包修订。执行`python3 tests/test-modem-fields-sms.py`；重编qmodem和luci-app-qmodem-sms，确保可选仓库与ROM一致。
+
+邻区信号优先策略位于`overlay/usr/libexec/cell-preference`，配置为`overlay/etc/config/cell_preference`，由`98-cell-preference`安装一分钟检查入口。运行`python3 tests/test-cell-preference.py`和`python3 tests/test-cell-preference-upgrade.py`验证选择门限、样本时序、恢复和配置保留。该策略通过共享AT服务运行，不添加串口持有者。
+
+PCDN转发白名单由`overlay/usr/libexec/pcdn_whitelist.py`提供，复用`pcdn-ipv6-access`的地址采集及定时任务，`99-pcdn-whitelist`安装OpenClash重建回调。运行`python3 tests/test-pcdn-whitelist.py`验证设备范围、IPv4映射限制、IPv6地址选择、链优先级、计数保留及安装回退。升级归档使用`scripts/ultra-signal-pcdn-upgrade.py`作为入口，调用两个独立安装器；公开默认配置不包含设备MAC或首选频点。

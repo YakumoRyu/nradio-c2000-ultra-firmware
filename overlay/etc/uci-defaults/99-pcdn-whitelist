@@ -1,0 +1,8 @@
+#!/bin/sh
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = NRadio-C2000MAX-Ultra ] || exit 0
+uci -q get pcdn.main.firewall_whitelist >/dev/null || {
+    uci set pcdn.main.firewall_whitelist=0
+    uci commit pcdn
+}
+/usr/bin/python3 /usr/libexec/pcdn_whitelist.py --install-hook || exit 1
+exit 0

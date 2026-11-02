@@ -1,0 +1,6 @@
+#!/bin/sh
+entry='* * * * * [ "$(uci -q get cell_preference.main.enabled)" = 1 ] && /usr/libexec/cell-preference >/dev/null 2>&1'
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+grep -Fq '/usr/libexec/cell-preference' /etc/crontabs/root || printf '%s\n' "$entry" >> /etc/crontabs/root
+exit 0
