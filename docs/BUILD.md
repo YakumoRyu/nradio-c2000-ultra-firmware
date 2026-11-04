@@ -56,3 +56,5 @@ CPU维护更新的回归使用`python3 tests/test-usb-watchdog.py`、`lua5.1 tes
 PCDN转发白名单由`overlay/usr/libexec/pcdn_whitelist.py`提供，复用`pcdn-ipv6-access`的地址采集及定时任务，`99-pcdn-whitelist`安装OpenClash重建回调。运行`python3 tests/test-pcdn-whitelist.py`验证设备范围、IPv4映射限制、IPv6地址选择、链优先级、计数保留及安装回退。升级归档使用`scripts/ultra-signal-pcdn-upgrade.py`作为入口，调用两个独立安装器；公开默认配置不包含设备MAC或首选频点。
 
 WAN恢复检测由`overlay/usr/libexec/openclash-wan-recover`提供。运行`python3 tests/test-wan-recovery.py`验证普通代理与国外AI覆盖、去重、游戏隔离及恢复门限；`python3 tests/test-wan-recovery-upgrade.py`验证单文件升级、重复应用、回退和个人配置保留。升级归档采用`scripts/ultra-wan-recovery-upgrade.py`，不触发实时核心重启。
+
+LuCI首页修复通过`luci.model.ultra_status_cache`与`ultra-home-status.js`合并后端采集和前端在途请求。运行`lua5.1 tests/test-status-cache.lua`、`lua5.1 tests/test-gateway-status.lua`、`node tests/test-home-status.cjs`及`python3 tests/test-luci-headroom-upgrade.py`；媒体暂停重试执行`python3 tests/test-media-stop-retry.py`和原`test-media-protection.py`。升级入口为`scripts/ultra-luci-headroom-upgrade.py`，仅重启媒体保护程序加载新逻辑。

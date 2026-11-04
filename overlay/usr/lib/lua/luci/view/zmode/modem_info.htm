@@ -59,6 +59,7 @@ local dev_name = _dev_names[dev_model] or dev_model
 %>
 <%+header%>
 <link rel="stylesheet" href="/fontawesome/all.min.css">
+<script src="<%=resource%>/ultra-home-status.js?v=20261104-r1"></script>
 <style>
 /* 移动端底部:深色底改由 html/body 承担(而非 .P 的 min-height:100vh)。
    原先 .P 强制 100vh,叠加主题顶部导航栏后总高超出视口,滚到底会多出一段空隙;
@@ -1073,10 +1074,10 @@ function cxLoad(cb){
 const STICKY_MS=120000,WARM_MS=15000;
 class UI{
 constructor(){this.sel=document.getElementById('modem_selector_select');this.sec=document.getElementById('mrt-sec');this.cfg=null;this.good=null;this.goodT=0;this.t0=Date.now();this.lastBdg='';this.lastSt='';this.sel.addEventListener('change',e=>{this.cfg=e.target.value;this.modem();});this.poll();}
-poll(){XHR.poll(5,'<%=luci.dispatcher.build_url("admin","modem","qmodem","get_modem_cfg")%>',{},(x,d)=>{if(d&&d.cfgs&&Array.isArray(d.cfgs)){this.sel.innerHTML='';d.cfgs.forEach(c=>{const o=document.createElement('option');o.value=c.cfg;o.textContent=c.name;this.sel.appendChild(o);});if(!this.cfg&&d.cfgs.length){this.cfg=d.cfgs[0].cfg;this.modem();}}});}
+poll(){XHR.poll(30,'<%=luci.dispatcher.build_url("admin","modem","qmodem","get_modem_cfg")%>',{},(x,d)=>{if(d&&d.cfgs&&Array.isArray(d.cfgs)){this.sel.innerHTML='';d.cfgs.forEach(c=>{const o=document.createElement('option');o.value=c.cfg;o.textContent=c.name;this.sel.appendChild(o);});if(!this.cfg&&d.cfgs.length){this.cfg=d.cfgs[0].cfg;this.modem();}}});}
 /* 走本包的 modem_ctrl(不是 qmodem 那个):服务端在这里做了粘滞缓存 + 2 秒合流,
    页面/屏保/手机端不会各自去抢 ttyUSB1。 */
-modem(){XHR.get('<%=luci.dispatcher.build_url("admin","fancontrol","modem_ctrl")%>',{cfg:this.cfg||'',action:'info',translate:'1'},(x,d)=>this.render(d));}
+modem(){UltraHomeStatus.get('modem','<%=luci.dispatcher.build_url("admin","fancontrol","modem_ctrl")%>',{cfg:this.cfg||'',action:'info',translate:'1'},(x,d)=>this.render(d));}
 isCell(e){return /基站信息|Cell Information/i.test((e.class||'')+(e.class_origin||''));}
 /* key 和 full_name 都要试: full_name 是翻译过的,中文语言包没装时它还是英文
    ("Reference Signal Received Power"),只按 full_name 找会整片读不到,看起来跟没信号一样 */
@@ -1085,8 +1086,8 @@ okVal(v){return v!==null&&v!==undefined&&String(v).trim()!==''&&String(v).trim()
 hasCell(d){return d.some(e=>this.isCell(e)&&this.okVal(e.value));}
 /* 只把这次缺的 key 从上一次好数据里补回来,已经拿到的一律以新值为准 */
 mergeGood(d){const seen={};d.forEach(e=>{if(e&&e.key)seen[e.key]=1;});return d.concat(this.good.filter(e=>e&&e.key&&!seen[e.key]));}
-gw(){XHR.get('<%=luci.dispatcher.build_url("admin","network","mwrt_assurance_status")%>',{},(x,d)=>{if(!d)return;const u=(id,v)=>{const e=document.getElementById(id);if(!e)return;const on=/在线|Online/i.test(v);e.textContent=v||'--';e.className='ch-s '+(on?'on':'off');const dot=document.getElementById(id+'-d');if(dot)dot.className='ch-d '+(on?'on':'off');};u('ch-w',d["宽带接口状态 / Primary Status"]);u('ch-c',d["蜂窝接口状态 / Secondary Status"]);const g=document.getElementById('gw-v');if(g)g.textContent=d["当前网关 / Gateway"]||'--';const f=document.getElementById('if-v');if(f)f.textContent=d["当前物理接口 / Current Interface"]||'--';});}
-dev(){XHR.get('<%=luci.dispatcher.build_url("admin","fancontrol","devinfo")%>',{},(x,d)=>{if(!d)return;const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v||'--';};
+gw(){UltraHomeStatus.get('gateway','<%=luci.dispatcher.build_url("admin","network","mwrt_assurance_status")%>',{},(x,d)=>{if(!d)return;const u=(id,v)=>{const e=document.getElementById(id);if(!e)return;const on=/在线|Online/i.test(v);e.textContent=v||'--';e.className='ch-s '+(on?'on':'off');const dot=document.getElementById(id+'-d');if(dot)dot.className='ch-d '+(on?'on':'off');};u('ch-w',d["宽带接口状态 / Primary Status"]);u('ch-c',d["蜂窝接口状态 / Secondary Status"]);const g=document.getElementById('gw-v');if(g)g.textContent=d["当前网关 / Gateway"]||'--';const f=document.getElementById('if-v');if(f)f.textContent=d["当前物理接口 / Current Interface"]||'--';});}
+dev(){UltraHomeStatus.get('device','<%=luci.dispatcher.build_url("admin","fancontrol","devinfo")%>',{},(x,d)=>{if(!d)return;const s=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v||'--';};
 // Header title
 const model=d["设备型号"]?.name||d["设备型号"]||'';if(model){const ht=document.getElementById('hdr-title');if(ht)ht.textContent='Mwrt-'+model;}
 s('f-model',model);s('f-host',d["主机名"]);s('f-fw',d["固件版本"]);s('f-kernel',d["内核版本"]);s('f-cpu',d["CPU型号"]);s('f-cores',d["CPU核心数"]?d["CPU核心数"]+' 核':'--');s('f-mem',d["内存总量"]);s('f-stor',d["存储已用"]&&d["存储总量"]?d["存储已用"]+' / '+d["存储总量"]:'--');
@@ -1231,10 +1232,11 @@ ui.modem();ui.gw();ui.dev();
 window._chart=new TrafficChart('traffic-canvas');
 initWind();
 loadScrStatus();
-setInterval(()=>{if(!document.hidden){ui.gw();ui.dev();}},2000);
+setInterval(()=>{if(!document.hidden)ui.dev();},5000);
+setInterval(()=>{if(!document.hidden)ui.gw();},10000);
 /* 蜂窝信息单独放慢到 4 秒,且页面切走时不轮询:每次 info 都要抢 ttyUSB1,
    打太勤反而读不到东西(就是"有信号却显示未连接"的来源),回到页面立刻补一次 */
-setInterval(()=>{if(!document.hidden)ui.modem();},4000);
+setInterval(()=>{if(!document.hidden)ui.modem();},5000);
 /* 载波聚合/邻区 30 秒一刷就够:采集器本身是 cron 一分钟一拍,刷得再勤也拿不到
    更新的数,而且这些量(频段、聚合结构、邻区列表)本来就变得慢。
    这个请求只读 /tmp 的 JSON,不占串口,所以不用跟着 4 秒那轮走。 */

@@ -18,6 +18,10 @@ jobs:
       - run: python3 tests/test-ui-hotfix.py
       - run: lua5.1 tests/test-modem-fields.lua
       - run: lua5.1 tests/test-cpu-sample.lua
+      - run: lua5.1 tests/test-status-cache.lua
+      - run: lua5.1 tests/test-gateway-status.lua
+      - run: node tests/test-home-status.cjs
+      - run: python3 tests/test-luci-headroom-upgrade.py
       - run: python3 tests/test-usb-watchdog.py
       - run: python3 tests/test-cell-preference.py
       - run: python3 tests/test-cell-preference-upgrade.py
@@ -28,6 +32,7 @@ jobs:
       - run: sh -n overlay/etc/uci-defaults/98-cell-preference
       - run: python3 tests/test-cpu-hotfix.py
       - run: python3 tests/test-media-protection.py
+      - run: python3 tests/test-media-stop-retry.py
       - run: ULTRA_HOTFIX_SCRIPT=scripts/ultra-maintenance-hotfix.py python3 tests/test-cpu-hotfix.py
       - run: sh -n overlay/usr/bin/mwrt-qmodem-usb3 && sh -n overlay/www/cgi-bin/router3d-data
       - run: sh -n overlay/usr/libexec/qmodem-at-ubus

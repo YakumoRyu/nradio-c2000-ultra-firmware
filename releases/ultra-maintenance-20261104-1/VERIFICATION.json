@@ -1,0 +1,94 @@
+{
+  "passed": true,
+  "kernel": "6.12.103",
+  "media_regression_tests": 28,
+  "installer_tests": 5,
+  "Lua_status_cache_and_gateway_suites_passed": true,
+  "JS_polling_suite_passed": true,
+  "runtime_core_restarted": false,
+  "runtime_modem_redialed": false,
+  "all_configuration_files_preserved": true,
+  "runtime": {
+    "passed": true,
+    "samples": 37,
+    "elapsed_seconds": 181,
+    "same_boot": true,
+    "same_core_pid": true,
+    "min_available_mib": 154.18,
+    "mean_cpu_busy": 10.23,
+    "max_cpu_busy": 26.32,
+    "mean_iowait": 0.1,
+    "max_iowait": 0.55,
+    "mean_tf_read_mib_s": 0.04,
+    "http_checks": [
+      {
+        "rc": 0,
+        "result": "200 0.009367"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001271"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001116"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001118"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001329"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001403"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001110"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001098"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001087"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001143"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001169"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001292"
+      },
+      {
+        "rc": 0,
+        "result": "200 0.001151"
+      }
+    ],
+    "active_guard_queue": {
+      "mediawarp": "stopping",
+      "openlist": "stopping",
+      "autofilm": "stopped",
+      "emby": "stopped"
+    },
+    "Emby_in_protection_queue": "stopped",
+    "final_archive_noop": true,
+    "all_configuration_files_preserved": true,
+    "phone_user_accepted": true
+  },
+  "private_configuration_included": false,
+  "VM_tuning_included": false,
+  "release": "ultra-maintenance-20261104-1",
+  "payload_files": 6,
+  "reboot_required": false,
+  "final_archive_noop_on_live_router": true
+}

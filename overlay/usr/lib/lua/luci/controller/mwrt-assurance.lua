@@ -75,24 +75,45 @@ function get_status()
     local target        = uci:get("Mwrt-Assurance", "wan_failover", "ping_target") or "8.8.8.8"
     local force_primary = uci:get("Mwrt-Assurance", "wan_failover", "force_primary") or "0"
 
-    -- 获取当前默认路由接口
-    local pipe = io.popen("ip route | grep '^default ' | awk '{print $5}'")
-    local current_if = pipe:read("*l") or ""
-    pipe:close()
-
-    local status_online  = "在线 / Online"
-    local status_offline = "离线 / Offline"
-    local status_enable  = "已启用 / Enabled"
-    local status_disable = "已关闭 / Disabled"
-
-    local status_data = {
-        ["当前物理接口 / Current Interface"]       = current_if,
-        ["当前网关 / Gateway"]                      = get_gateway(current_if),
-        ["当前是否联网 / Current Status"]           = check_online(current_if, target) and status_online or status_offline,
-        ["宽带接口状态 / Primary Status"]         = check_online(primary_if, target) and status_online or status_offline,
-        ["蜂窝接口状态 / Secondary Status"]     = check_online(secondary_if, target) and status_online or status_offline,
-        ["主接口有网切换 / Force Primary"]           = (force_primary == "1") and status_enable or status_disable
-    }
+    local cache_key = "gateway_" .. primary_if .. "_" .. secondary_if
+    local status_data = require("luci.model.ultra_status_cache").get(cache_key, 5, 30, function()
+        local routes = {}
+        local current_if, current_gw, metric = "", "", math.huge
+        local file = io.open("/proc/net/route", "r")
+        if file then
+            for line in file:lines() do
+                local dev,dst,gw,flags,m = line:match("^(%S+)%s+(%x+)%s+(%x+)%s+(%x+)%s+%d+%s+%d+%s+(%d+)")
+                if dst == "00000000" and (tonumber(flags,16) or 0)%2 == 1 then
+                    routes[dev] = true
+                    if tonumber(m) < metric then
+                        current_if, metric = dev, tonumber(m)
+                        local n = tonumber(gw,16) or 0
+                        current_gw = string.format("%d.%d.%d.%d",n%256,math.floor(n/256)%256,math.floor(n/65536)%256,math.floor(n/16777216)%256)
+                    end
+                end
+            end
+            file:close()
+        end
+        local checked = {}
+        local function online(dev)
+            if checked[dev] ~= nil then return checked[dev] end
+            local carrier_file = dev:match("^[%w_%.:%-]+$") and io.open("/sys/class/net/" .. dev .. "/carrier", "r")
+            local carrier
+            if carrier_file then carrier = carrier_file:read("*l"); carrier_file:close() end
+            if carrier == "0" or dev == "" then checked[dev] = false
+            else checked[dev] = check_online(dev, target) end
+            return checked[dev]
+        end
+        local on, off = "在线 / Online", "离线 / Offline"
+        return {
+            ["当前物理接口 / Current Interface"] = current_if,
+            ["当前网关 / Gateway"] = current_gw,
+            ["当前是否联网 / Current Status"] = online(current_if) and on or off,
+            ["宽带接口状态 / Primary Status"] = online(primary_if) and on or off,
+            ["蜂窝接口状态 / Secondary Status"] = online(secondary_if) and on or off,
+            ["主接口有网切换 / Force Primary"] = force_primary == "1" and "已启用 / Enabled" or "已关闭 / Disabled"
+        }
+    end, {})
 
     luci.http.prepare_content("application/json")
     luci.http.write_json(status_data)

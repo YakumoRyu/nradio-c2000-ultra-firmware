@@ -17,7 +17,8 @@ class PressureGate:
   if s['available_mb']<64:return 'critical_memory'
   swapping=s['swap_in_mb_per_second'] is not None and s['swap_in_mb_per_second']>=2
   missing_counter_with_low_headroom=s['swap_in_mb_per_second'] is None and s['available_mb']<192
-  conditions={'low_memory':(s['available_mb']<128,15),'swap_io_stall':(s['iowait_percent']>=30 and (swapping or missing_counter_with_low_headroom),15),'cpu_saturation':(s['cpu_busy_percent']>=90 and s['media_cpu_percent']>=8,20)}
+  file_reclaim_pressure=s['available_mb']<192
+  conditions={'low_memory':(s['available_mb']<128,15),'swap_io_stall':(s['iowait_percent']>=30 and (swapping or missing_counter_with_low_headroom or file_reclaim_pressure),15),'cpu_saturation':(s['cpu_busy_percent']>=90 and s['media_cpu_percent']>=8,20)}
   for key,(bad,seconds) in conditions.items():
    if bad:
     if key not in self.since:self.since[key]=now
@@ -190,6 +191,15 @@ class RecoveryPlan:
     recent=[v for v in old.get('recovery_uptimes',[]) if isinstance(v,(int,float)) and 0<=now-v<3600]
     if recent:self.attempts=[{'name':n,'uptime':max(recent)} for n in ALLOWED]
   self.healthy_since=None;self.candidate=None
+  self.stop_attempts=[]
+  if old.get('boot_id')==boot_id:
+   self.stop_attempts=[x for x in old.get('stop_attempts',[]) if isinstance(x,dict) and x.get('name') in ALLOWED and isinstance(x.get('uptime'),(int,float)) and 0<=now-x['uptime']<3600]
+ def can_stop(self,name,now):
+  self.stop_attempts=[x for x in self.stop_attempts if 0<=now-x['uptime']<3600]
+  rows=[x for x in self.stop_attempts if x['name']==name]
+  return len(rows)<3 and (not rows or now-max(x['uptime'] for x in rows)>=120)
+ def stop_requested(self,name,now):
+  self.stop_attempts.append({'name':name,'uptime':now})
  def next(self,stopped,measured,now,last_stop):
   self.attempts=[v for v in self.attempts if 0<=now-v['uptime']<3600]
   name=next((n for n in RESUME_ORDER if n in stopped),None)
@@ -255,8 +265,8 @@ def load_state():
 
 def persist_state(data):
  # Only ownership/actions change on TF storage; five-second measurements stay in tmpfs.
- keys=('boot_id','stopped_by_guard','last_stop_uptime','recovery_uptimes','recovery_attempts','last_action','service_phases')
- state={k:data.get(k,{}) if k=='service_phases' else data[k] for k in keys}
+ keys=('boot_id','stopped_by_guard','last_stop_uptime','recovery_uptimes','recovery_attempts','last_action','service_phases','stop_attempts')
+ state={k:data.get(k,{}) if k=='service_phases' else data.get(k,[]) if k=='stop_attempts' else data[k] for k in keys}
  try:
   with open(PERSIST) as f:
    if json.load(f)==state:return
@@ -269,6 +279,7 @@ def checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan):
  global persist_error_reported
  data={'epoch':time.time(),'boot_id':boot_id,'last_stop_uptime':last_stop,'recovery_uptimes':recoveries,'recovery_attempts':plan.attempts,'next_recovery':plan.candidate,'state':'media_suspended_for_routing' if stopped else 'protecting','measurements':measured,'stopped_by_guard':stopped,'last_action':last_action,'automatic_recoveries_last_hour':len(recoveries),'thresholds':{'critical_available_mb':64,'sustained_available_mb':128,'memory_duration_seconds':15,'sustained_iowait_percent':30,'swap_in_mb_per_second':2,'cpu_busy_percent':90,'cpu_duration_seconds':20,'resume_available_mb':RESUME_AVAILABLE_MB,'resume_cpu_busy_percent':80,'resume_stable_seconds':STABLE_SECONDS,'recovery_stage_seconds':STAGE_SECONDS}}
  data['service_phases']={n:plan.phases.get(n,'stopping') for n in stopped}
+ data['stop_attempts']=plan.stop_attempts
  write(data)
  try:persist_state(data);persist_error_reported=False
  except OSError:
@@ -304,13 +315,15 @@ def run():
    if reason:
     running=inspect()
     # Shed one service, then remeasure before touching the next service.
-    order=('emby','autofilm') if reason=='critical_memory' else ('autofilm','emby')
-    targets=[n for n in order if running[n]['running'] and n not in stopped][:1]
-    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if running[n]['running'] and n not in stopped][:1]
+    order=('emby','autofilm') if reason in ('critical_memory','swap_io_stall') else ('autofilm','emby')
+    eligible=lambda n:running[n]['running'] and (n not in stopped or plan.phases.get(n)=='stopping') and plan.can_stop(n,now)
+    targets=[n for n in order if eligible(n)][:1]
+    if not targets and measured['available_mb']<96:targets=[n for n in ('mediawarp','openlist') if eligible(n)][:1]
     if targets:
      # Save ownership before Docker can time out after actually stopping a container.
      stopped=list(dict.fromkeys(stopped+targets));last_stop=now;plan.healthy_since=None;gate=PressureGate();last_action={'epoch':time.time(),'action':'stop_media','reason':reason,'containers':targets,'result':'requested'}
      last_action['measurements']=measured;plan.stopping(targets)
+     for name in targets:plan.stop_requested(name,now)
      checkpoint(boot_id,stopped,last_stop,recoveries,last_action,measured,plan)
      stop(targets)
      last_action['result']='completed'

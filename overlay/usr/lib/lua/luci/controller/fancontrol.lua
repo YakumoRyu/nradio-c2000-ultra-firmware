@@ -730,8 +730,10 @@ function modemCtrl()
 		if fresh and fresh["age"] <= INFO_CACHE_FRESH then
 			info = info_from_cache(fresh, false)
 		else
-			raw = shell(modem_ctrl.."info "..cfg_id)
-			info = modem_info_sticky(cfg_id, path, raw)
+			info = require("luci.model.ultra_status_cache").get("modem_" .. cfg_id, 3, 120, function()
+				raw = shell(modem_ctrl.."info "..cfg_id)
+				return modem_info_sticky(cfg_id, path, raw)
+			end, fresh and info_from_cache(fresh, true) or {result = {}, modem_info = {}})
 		end
 	elseif params then
 		raw = shell(modem_ctrl..action.." "..cfg_id.." ".."\""..params.."\"")
