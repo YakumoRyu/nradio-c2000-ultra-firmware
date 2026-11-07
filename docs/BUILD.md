@@ -58,3 +58,4 @@ PCDN转发白名单由`overlay/usr/libexec/pcdn_whitelist.py`提供，复用`pcd
 WAN恢复检测由`overlay/usr/libexec/openclash-wan-recover`提供。运行`python3 tests/test-wan-recovery.py`验证普通代理与国外AI覆盖、去重、游戏隔离及恢复门限；`python3 tests/test-wan-recovery-upgrade.py`验证单文件升级、重复应用、回退和个人配置保留。升级归档采用`scripts/ultra-wan-recovery-upgrade.py`，不触发实时核心重启。
 
 LuCI首页修复通过`luci.model.ultra_status_cache`与`ultra-home-status.js`合并后端采集和前端在途请求。运行`lua5.1 tests/test-status-cache.lua`、`lua5.1 tests/test-gateway-status.lua`、`node tests/test-home-status.cjs`及`python3 tests/test-luci-headroom-upgrade.py`；媒体暂停重试执行`python3 tests/test-media-stop-retry.py`和原`test-media-protection.py`。升级入口为`scripts/ultra-luci-headroom-upgrade.py`，仅重启媒体保护程序加载新逻辑。
+无线停播恢复使用`python3 tests/test-wifi-health.py`和`python3 tests/test-wifi-health-upgrade.py`回归。观察服务、init与首启启用脚本位于`overlay`，安装器为`scripts/ultra-wifi-health-upgrade.py`。完整镜像同时检查服务启动链接与历史目录为空。

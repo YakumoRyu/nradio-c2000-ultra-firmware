@@ -1,0 +1,326 @@
+#!/usr/bin/python3
+"""Observe AP state and confirmed beacon loss; recover only the affected radios."""
+import argparse
+import json
+import os
+import re
+import selectors
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+STATE = Path('/tmp/ultra-wifi-health.json')
+HISTORY = Path('/overlay/ultra-wifi-health')
+INTERVAL = 30
+GRACE = 180
+COOLDOWN = 900
+MAX_HOURLY = 2
+VALID_NAME = re.compile(r'^[A-Za-z0-9_.-]{1,48}$')
+
+
+def command(args, timeout=4):
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return -1, ''
+
+
+def object_call(args):
+    rc, output = command(args)
+    if rc:
+        return None
+    try:
+        obj = json.loads(output)
+        return obj if isinstance(obj, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def uptime():
+    return float(Path('/proc/uptime').read_text().split()[0])
+
+
+def configured_aps(data):
+    """Honor explicit disable/down, pending setup and non-AP interfaces."""
+    result = []
+    for radio, entry in data.items():
+        if not VALID_NAME.fullmatch(radio) or not isinstance(entry, dict):
+            continue
+        cfg = entry.get('config', {})
+        if (entry.get('disabled') or cfg.get('disabled') or entry.get('pending')
+                or not entry.get('autostart', False)):
+            continue
+        for iface in entry.get('interfaces', []):
+            icfg = iface.get('config', {})
+            name = iface.get('ifname', '')
+            if (icfg.get('mode') != 'ap' or icfg.get('disabled')
+                    or not VALID_NAME.fullmatch(name)):
+                continue
+            band = {'2g': 0, '5g': 1}.get(cfg.get('band'))
+            result.append({'radio': radio, 'ifname': name, 'band': band,
+                           'radio_up': bool(entry.get('up'))})
+    return result
+
+
+def inspect_aps():
+    data = object_call(['ubus', '-t', '3', 'call', 'network.wireless', 'status'])
+    if data is None:
+        return None  # A failed control-plane query is not proof of a failed radio.
+    result = configured_aps(data)
+    for ap in result:
+        status = object_call(['ubus', '-t', '3', 'call',
+                              'hostapd.' + ap['ifname'], 'get_status'])
+        if status and status.get('dfs', {}).get('cac_active'):
+            ap['health'] = 'waiting'
+        elif status and status.get('status') in ['DFS', 'COUNTRY_UPDATE', 'ACS']:
+            ap['health'] = 'waiting'
+        elif status and status.get('status') == 'ENABLED' and ap['radio_up']:
+            try:
+                flags = int(Path('/sys/class/net', ap['ifname'], 'flags').read_text(), 16)
+                ap['health'] = 'up' if flags & 1 else 'down'
+            except (OSError, ValueError):
+                ap['health'] = 'down'
+        else:
+            ap['health'] = 'down'
+    return result
+
+
+def parse_event(line, now):
+    """Keep structured fault facts, never raw syslog or wireless configuration."""
+    stamp = re.search(r'kernel:\s*\[\s*(\d+(?:\.\d+)?)\]', line)
+    if not stamp:
+        return None
+    when = float(stamp[1])
+    if when > now + 5 or now - when > 75:
+        return None
+    beacon = re.search(r'nobcn (?:occurs|still occur) within (\d+) sec for band (\d+)', line)
+    if beacon:
+        return {'kind': 'beacon_stopped', 'band': int(beacon[2]),
+                'seconds': int(beacon[1]), 'uptime': when}
+    recovered = re.search(r'bcn recover for band (\d+)', line)
+    if recovered:
+        return {'kind': 'beacon_resumed', 'band': int(recovered[1]), 'uptime': when}
+    kinds = [('RX descriptor fault', 'rx_descriptor_fault'),
+             ('EMI Read Out of Range', 'emi_fault'),
+             ('Out of memory:', 'oom'), ('oom-kill:', 'oom'),
+             ('Kernel panic', 'kernel_panic'), ('soft lockup', 'soft_lockup')]
+    for text, kind in kinds:
+        if text in line:
+            return {'kind': kind, 'uptime': when}
+    return None
+
+
+class Policy:
+    def __init__(self):
+        self.failures = {}
+        self.beacons = {}
+        self.last_action = -COOLDOWN
+        self.attempts = []
+
+    def event(self, event):
+        if event['kind'] == 'beacon_stopped':
+            self.beacons[event['band']] = event
+        elif event['kind'] == 'beacon_resumed':
+            self.beacons.pop(event['band'], None)
+
+    def evaluate(self, aps, now):
+        if aps is None:
+            self.failures.clear()
+            return []
+        present = {ap['ifname'] for ap in aps}
+        self.failures = {k: v for k, v in self.failures.items() if k in present}
+        broken = []
+        for ap in aps:
+            name = ap['ifname']
+            if ap['health'] == 'waiting':
+                self.failures.pop(name, None)
+                self.beacons.pop(ap['band'], None)
+                continue
+            count = self.failures.get(name, 0) + 1 if ap['health'] == 'down' else 0
+            self.failures[name] = count
+            event = self.beacons.get(ap['band'], {})
+            beacon_fault = (event.get('seconds', 0) >= 20
+                            and 0 <= now - event.get('uptime', -1000) <= 75)
+            if count >= 3 or beacon_fault:
+                broken.append({'radio': ap['radio'], 'ifname': name,
+                               'reason': 'beacon_stopped' if beacon_fault else 'ap_unavailable'})
+        self.attempts = [x for x in self.attempts if 0 <= now - x < 3600]
+        if now < GRACE or now - self.last_action < COOLDOWN or len(self.attempts) >= MAX_HOURLY:
+            return []
+        return broken
+
+    def action(self, now):
+        self.last_action = now
+        self.attempts.append(now)
+        self.failures.clear()
+        self.beacons.clear()
+
+
+class History:
+    def __init__(self, root=HISTORY):
+        self.root = root
+        self.last = {}
+
+    def append(self, event):
+        key = (event.get('kind'), event.get('band'))
+        now = time.monotonic()
+        if event.get('kind') not in ['recovery', 'recovery_result', 'boot']:
+            if now - self.last.get(key, -1000) < 30:
+                return
+        self.last[key] = now
+        try:
+            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.root.chmod(0o700)
+            p = self.root / 'events.jsonl'
+            if p.exists() and p.stat().st_size >= 262144:
+                os.replace(p, self.root / 'events.previous.jsonl')
+            line = dict(event, recorded=int(time.time()))
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(json.dumps(line, separators=(',', ':')) + '\n')
+        except OSError:
+            pass  # TF storage failure must not terminate wireless supervision.
+
+
+def recover(radios, run=command):
+    results = []
+    for radio in sorted(set(radios)):
+        if not VALID_NAME.fullmatch(radio):
+            continue
+        payload = json.dumps({'device': radio}, separators=(',', ':'))
+        down = run(['ubus', '-t', '18', 'call', 'network.wireless', 'down', payload], timeout=20)[0]
+        # Always attempt up, including after a failed/timed out down operation.
+        up = run(['ubus', '-t', '28', 'call', 'network.wireless', 'up', payload], timeout=30)[0]
+        results.append({'radio': radio, 'down_rc': down, 'up_rc': up})
+    return results
+
+
+def save_state(policy, aps, now, boot_id):
+    safe = {'boot_id': boot_id, 'uptime': round(now, 1), 'aps': aps,
+            'last_recovery_uptime': policy.last_action,
+            'attempts': policy.attempts, 'consecutive_failures': policy.failures}
+    try:
+        tmp = STATE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(safe, separators=(',', ':')), encoding='utf-8')
+        tmp.chmod(0o600)
+        os.replace(tmp, STATE)
+    except OSError:
+        pass
+
+
+def resources():
+    try:
+        mem = {}
+        for line in Path('/proc/meminfo').read_text().splitlines():
+            k, v = line.split(':', 1)
+            if k in ['MemAvailable', 'SwapFree', 'Slab']:
+                mem[k] = int(v.split()[0])
+        cpu = [int(x) for x in Path('/proc/stat').read_text().splitlines()[0].split()[1:]]
+        temps = [int(p.read_text()) for p in Path('/sys/class/thermal').glob('thermal_zone*/temp')]
+        return {'memory_kib': mem, 'cpu_ticks': cpu, 'thermal_millidegrees': temps}
+    except (OSError, ValueError):
+        return {}
+
+
+def still_broken(broken, aps):
+    by_name = {ap['ifname']: ap for ap in aps or [] if ap['health'] != 'waiting'}
+    return [x for x in broken if x['ifname'] in by_name
+            and (x['reason'] == 'beacon_stopped' or by_name[x['ifname']]['health'] == 'down')]
+
+
+def restore_policy(boot_id):
+    policy = Policy()
+    try:
+        s = json.loads(STATE.read_text())
+        if s['boot_id'] == boot_id:
+            policy.last_action = float(s['last_recovery_uptime'])
+            policy.attempts = [float(x) for x in s['attempts']]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return policy
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--once', action='store_true', help='Read-only AP status check')
+    args = parser.parse_args()
+    if args.once:
+        print(json.dumps({'aps': inspect_aps(), 'uptime': uptime()}))
+        return
+    import fcntl
+    lock = open('/var/run/ultra-wifi-health.lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+    boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    policy = restore_policy(boot_id)
+    history = History()
+    history.append({'kind': 'boot', 'boot_id': boot_id, 'uptime': uptime()})
+    stream = subprocess.Popen(['/sbin/logread', '-f'], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL)
+    os.set_blocking(stream.stdout.fileno(), False)
+    selector = selectors.DefaultSelector()
+    selector.register(stream.stdout, selectors.EVENT_READ)
+    pending = b''
+    next_probe = 0
+    next_snapshot = 0
+    alive = True
+
+    def stop(*_):
+        nonlocal alive
+        alive = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while alive:
+            now = uptime()
+            for key, _ in selector.select(timeout=max(0, min(5, next_probe - now))):
+                data = os.read(key.fileobj.fileno(), 65536)
+                if not data:
+                    return  # procd restarts both observer and its failed log stream.
+                pending += data
+                lines = pending.split(b'\n')
+                pending = lines.pop()[-16384:]
+                for line in lines:
+                    event = parse_event(line.decode('utf-8', 'replace'), now)
+                    if event:
+                        policy.event(event)
+                        history.append(event)
+            if now < next_probe:
+                continue
+            aps = inspect_aps()
+            if now >= next_snapshot:
+                history.append({'kind': 'snapshot', 'uptime': now,
+                                'aps': aps, 'resources': resources()})
+                next_snapshot = now + 900
+            broken = policy.evaluate(aps, now)
+            if broken:
+                # Re-read immediately before acting so pending or manually disabled
+                # radios never inherit an earlier health failure.
+                fresh = inspect_aps()
+                broken = still_broken(broken, fresh)
+            if broken:
+                policy.action(now)
+                save_state(policy, aps, now, boot_id)
+                history.append({'kind': 'recovery', 'uptime': now,
+                                'targets': broken, 'resources': resources()})
+                results = recover([ap['radio'] for ap in broken])
+                history.append({'kind': 'recovery_result', 'uptime': uptime(), 'results': results})
+            save_state(policy, aps, now, boot_id)
+            next_probe = uptime() + INTERVAL
+    finally:
+        selector.close()
+        stream.terminate()
+        try:
+            stream.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            stream.kill()
+            stream.wait()
+
+
+if __name__ == '__main__':
+    main()

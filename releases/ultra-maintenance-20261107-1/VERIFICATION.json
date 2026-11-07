@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "kernel": "6.12.103",
+  "wireless_health_tests": 15,
+  "installer_tests": 5,
+  "runtime": {
+    "passed": true,
+    "seconds": 191,
+    "samples": 13,
+    "cpu_average": 66.38,
+    "cpu_peak": 78.77,
+    "iowait_average": 0.46,
+    "min_available_mib": 123.2,
+    "guard_rss": "11608 kB",
+    "guard_same_pid": true,
+    "http_max_ms": 1215,
+    "unnecessary_recoveries": 0,
+    "final_archive_noop": true,
+    "all_configuration_files_preserved": true,
+    "boot_and_hostapd_preserved": true,
+    "both_aps_up": true
+  },
+  "configuration_preserved": true,
+  "private_configuration_included": false,
+  "reboot_required": false,
+  "release": "ultra-maintenance-20261107-1",
+  "payload_files": 3,
+  "final_archive_noop_on_live_router": true,
+  "initial_failure_trigger_confirmed": false,
+  "fixed_path": "Confirmed beacon loss and repeated unavailable APs now invoke bounded per-radio recovery",
+  "production_fault_injection_performed": false,
+  "continuous_monitoring_seconds": 191,
+  "physical_client_scan": {
+    "both_bands_visible": true,
+    "bands": [
+      "2.4GHz",
+      "5GHz"
+    ],
+    "beacon_interval_tu": 100
+  }
+}

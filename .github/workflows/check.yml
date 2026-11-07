@@ -22,6 +22,9 @@ jobs:
       - run: lua5.1 tests/test-gateway-status.lua
       - run: node tests/test-home-status.cjs
       - run: python3 tests/test-luci-headroom-upgrade.py
+      - run: python3 tests/test-wifi-health.py
+      - run: python3 tests/test-wifi-health-upgrade.py
+      - run: sh -n overlay/etc/init.d/ultra-wifi-health && sh -n overlay/etc/uci-defaults/99-ultra-wifi-health
       - run: python3 tests/test-usb-watchdog.py
       - run: python3 tests/test-cell-preference.py
       - run: python3 tests/test-cell-preference-upgrade.py

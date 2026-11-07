@@ -10,24 +10,24 @@
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r3 |
 | OpenClash | v0.48.002，Ultra适配包0.48.002-rultra1 |
 | Mihomo | v1.19.33 |
-| 完整固件 | ultra-25.12-20261104-r15 |
-| 升级包 | ultra-maintenance-20261104-1 |
+| 完整固件 | ultra-25.12-20261107-r16 |
+| 升级包 | ultra-maintenance-20261107-1 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [LuCI首页与资源保护升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261104-1) | 合并状态采集、限制重复轮询，修复媒体暂停重试，保留个人配置。 |
-| [完整r15固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261104-r15) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
+| [无线停播恢复升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261107-1) | 确认持续停播或AP不可用后恢复对应频段，保留关键故障记录及个人配置。 |
+| [完整r16固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261107-r16) | 内核和完整根文件系统，全部通用修复编入ROM。配套离线软件仓库在同一Release下载。 |
 
-本次修复手机访问LuCI首页时的请求堆积：状态采集跨页面合并，同类请求只保留一个在途，减少网关重复探测。媒体暂停超时后可以有间隔、有上限地重试，持续文件页回收造成的I/O等待也进入路由优先保护。完整r15将相同修复编入ROM，整镜像待实机启动验收。
+本次补齐无线广播停止后的恢复处理：驱动确认持续无Beacon，或AP连续三次不可用时，经二次确认后恢复对应频段。检测跳过手动关闭、DFS等待及正常空闲；关键事件与资源样本保存在TF卡。r15的LuCI状态合并和媒体资源保护保持，完整r16整镜像待实机启动验收。
 
 PCDN白名单按设备MAC及LAN接口匹配，优先于OpenClash全局过滤，支持动态公网IPv6。保留NAT、UPnP与其他设备的防火墙策略，公共出厂配置默认关闭。
 
 完整固件约208MiB，可选软件仓库约146MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261104-1/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261107-1/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)
@@ -35,6 +35,8 @@ PCDN白名单按设备MAC及LAN接口匹配，优先于OpenClash全局过滤，�
 - [项目记忆](docs/PROJECT_MEMORY.md)
 
 ## 已集成的改动
+
+- **无线停播恢复**：确认持续无Beacon或AP不可用后只恢复对应频段；15分钟冷却、每小时最多两次；关键事件持久保存。
 
 - **锁区后扫频**：临时解除锁定、等待无线空闲、异步接收结果，结束或异常退出自动恢复原网络；锁区使用正确ARFCN。
 

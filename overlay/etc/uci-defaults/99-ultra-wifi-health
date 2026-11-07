@@ -1,0 +1,3 @@
+#!/bin/sh
+/etc/init.d/ultra-wifi-health enable
+exit 0

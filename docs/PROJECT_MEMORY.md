@@ -116,3 +116,10 @@ r10为每个保护目标保存stopping、stopped、starting阶段。停止中的
 ## 2026-10-23 号码、短信及1150适配
 
 用户确认保留巴龙WebUI短信和PushPlus，移除QModem短信页与重复短信管理；共享收信/转发后台保留。修复CNUM首字段标签被当作号码；按正确HCSQ顺序补读LTE SINR。系统切换脚本已存在且CRC检查通过，本次将按钮移出旧ndis配置节并增加POST/CSRF校验；未实际切换官方系统。1150仍是24.10/6.6.94，沿用当前25.12/6.12.103和闭源驱动。双包为ultra-maintenance-20261023-1及完整预发布ultra-25.12-20261023-r8，说明见MWRT1150_COMPARISON.md。另保留约16:47未确认原因重启记录。
+## 2026-11-07 早晨Wi-Fi名称消失
+
+用户确认双频名称完全搜不到，并于09:45手动重启恢复。现场只剩重启后的128KiB内存日志，pstore为空；不能将新启动的常见驱动告警当作先前故障证据。mtk_pci哈希仍为3618559d，原952/954修复已加载。
+
+厂商源码BcnCheck在连续无Beacon时只记录超时并调整固件日志，没有恢复动作。本次新增ultra-wifi-health观察服务：驱动连续无Beacon至少20秒，或AP连续三次不可用，经最终复查后调用network.wireless的定向down/up。避开/sbin/wifi up隐含的全局network reload。跳过手动关闭、DFS等待和正常空闲，恢复间隔900秒，每小时最多两次；同boot进程重启保留限频。
+
+事件类别及资源快照以两份256KiB上限日志保存在/overlay/ultra-wifi-health；不保存原始syslog、SSID、密码或客户端身份。默认30秒检测、180秒启动宽限，日常不扫频、不重启网络。15项策略测试和5项安装回退测试通过；实机部署保持boot、hostapd与netifd PID及全部个人配置。双包独立发布为ultra-maintenance-20261107-1、ultra-25.12-20261107-r16；完整镜像启动单列验收。
