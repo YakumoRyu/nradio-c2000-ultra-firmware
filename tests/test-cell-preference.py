@@ -7,6 +7,7 @@ from unittest.mock import patch
 import tempfile
 import contextlib
 import io
+import json
 import sys
 
 path=Path(__file__).resolve().parents[1]/'overlay/usr/libexec/cell-preference'
@@ -61,11 +62,14 @@ class SelectionTests(unittest.TestCase):
         calls=[]
         baseline='AT^NRFREQLOCK=1,1,1,"78","632000","1"'
         selected='AT^NRFREQLOCK=2,1,1,"78","635000","1","397"'
+        active=baseline
         def at(port,cmd):
+            nonlocal active
             calls.append(cmd)
             if cmd=='AT^NRFREQLOCK?':
-                return '^NRFREQLOCK: 1\n1,1\n78,632000,1\nOK' if baseline in calls else '^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK'
+                return '^NRFREQLOCK: 1\n1,1\n78,632000,1\nOK' if active==baseline else '^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK'
             if cmd=='AT^MONSC':return '^MONSC: NR,460,01,635000,1,100000001,64,100001,-80,-10,20\nOK'
+            if cmd in (baseline,selected):active=cmd
             return 'OK'
         with tempfile.TemporaryDirectory() as d,patch.object(m,'HISTORY',Path(d)),patch.object(m,'at',at),patch.object(m.time,'sleep',lambda _:None):
             phase,actual=m.select_cell(self.current,self.good,self.cfg,baseline,probe=lambda:True)
@@ -74,9 +78,12 @@ class SelectionTests(unittest.TestCase):
         self.assertIn(selected,calls);self.assertIn(baseline,calls)
         self.assertFalse(any('CFUN' in cmd or 'NDISDUP' in cmd for cmd in calls))
     def test_success_requires_actual_serving_cell_change(self):
+        selected=False
         def at(port,cmd):
-            if cmd=='AT^NRFREQLOCK?':return '^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK'
+            nonlocal selected
+            if cmd=='AT^NRFREQLOCK?':return '^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK' if selected else '^NRFREQLOCK: 0\nOK'
             if cmd=='AT^MONSC':return '^MONSC: NR,460,01,635000,1,100000002,18D,100001,-70,-10,21\nOK'
+            if cmd.startswith('AT^NRFREQLOCK=2,'):selected=True
             return 'OK'
         with tempfile.TemporaryDirectory() as d,patch.object(m,'HISTORY',Path(d)),patch.object(m,'at',at),patch.object(m.time,'sleep',lambda _:None):
             phase,_=m.select_cell(self.current,self.good,self.cfg,'AT^NRFREQLOCK=0',probe=lambda:True)
@@ -119,5 +126,107 @@ class SelectionTests(unittest.TestCase):
             self.assertEqual(m.load(root/'state.json')['phase'],'preferred_frequency_active')
             self.assertEqual(m.load(root/'state.json')['expected_lock'],'AT^NRFREQLOCK=1,0,1,"78","635000","1"')
         self.assertNotIn('AT^NRFREQLOCK=0',calls)
+
+    def test_fallback_frequency_does_not_get_promoted_over_preference(self):
+        self.cfg['preferred_arfcn']=632000
+        state,target=self.decide([self.good])
+        self.assertEqual(state['phase'],'preferred_frequency_unavailable')
+        self.assertIsNone(target)
+
+    @contextlib.contextmanager
+    def runtime(self,root,query):
+        with patch.multiple(m,HISTORY=root/'history',STATE=root/'state.json',
+                            SCAN=root/'scan.json',RUNTIME_LOCK=root/'runtime.lock',at=query,
+                            config=lambda:{'enabled':'1','preferred_arfcn':'635000'}):
+            yield
+
+    def test_external_lock_updates_serving_status_without_any_setter(self):
+        replies={'AT^NRFREQLOCK?':'^NRFREQLOCK: 2\n0,1\n78,635000,1,397\nOK',
+                 'AT^MONSC':'^MONSC: NR,460,01,635000,1,100000002,18D,100001,-70,-10,21\nOK'}
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            with self.runtime(root,lambda port,cmd:replies[cmd]),patch.object(sys,'argv',['cell-preference']):
+                m.atomic(m.STATE,{'expected_lock':'AT^NRFREQLOCK=0','phase':'manual_lock_changed',
+                                  'current':self.current|{'arfcn':632000},'count':3})
+                m.main()
+                state=m.load(m.STATE)
+                self.assertEqual(state['phase'],'external_lock_active')
+                self.assertEqual(state['current']['arfcn'],635000)
+                self.assertEqual(state['count'],0)
+                log=m.HISTORY/'events.jsonl'
+                row=json.loads(log.read_text())
+                self.assertEqual(row['cell']['pci'],397)
+                self.assertNotIn('nci',row['cell'])
+                before=log.read_bytes()
+                m.main()
+                self.assertEqual(log.read_bytes(),before)
+
+    def test_status_preserves_pending_transaction_and_does_not_create_files(self):
+        replies={'AT^NRFREQLOCK?':'^NRFREQLOCK: 2\n0,1\n78,635000,1,397\nOK',
+                 'AT^MONSC':'^MONSC: NR,460,01,635000,1,100000002,18D,100001,-70,-10,21\nOK'}
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            output=io.StringIO()
+            with self.runtime(root,lambda port,cmd:replies[cmd]),patch.object(sys,'argv',['cell-preference','--check']),contextlib.redirect_stdout(output):
+                journal=m.HISTORY/'pending.json'
+                m.atomic(journal,{'baseline':'AT^NRFREQLOCK=0','requested':'AT^NRFREQLOCK=2,0,1,"78","635000","1","397"'})
+                before=journal.read_bytes()
+                m.main()
+                self.assertEqual(json.loads(output.getvalue())['phase'],'transaction_pending')
+                self.assertEqual(journal.read_bytes(),before)
+                self.assertFalse(m.STATE.exists())
+                self.assertFalse(m.RUNTIME_LOCK.exists())
+
+    def test_trial_cannot_commit_after_required_ipv6_default_route_disappears(self):
+        active=False
+        def at(port,cmd):
+            nonlocal active
+            if cmd=='AT^NRFREQLOCK?':return '^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK' if active else '^NRFREQLOCK: 0\nOK'
+            if cmd=='AT^MONSC':return '^MONSC: NR,460,01,635000,1,100000002,18D,100001,-70,-10,21\nOK'
+            active=cmd!='AT^NRFREQLOCK=0'
+            return 'OK'
+        def run(args,timeout):
+            self.assertEqual(args[:5],['ip','-6','route','show','default'])
+            return 'default via fe80::1 dev eth2' if not active else ''
+        with tempfile.TemporaryDirectory() as d,patch.multiple(m,HISTORY=Path(d),at=at,run=run),patch.object(m.subprocess,'run',return_value=type('Probe',(),{'returncode':0})()),patch.object(m.time,'sleep'):
+            phase, actual=m.select_cell(self.current,self.good,self.cfg,'AT^NRFREQLOCK=0')
+            self.assertEqual((phase,actual),('original_setting_restored','AT^NRFREQLOCK=0'))
+            self.assertFalse(active)
+            self.assertFalse((Path(d)/'last-selection.json').exists())
+
+    def test_trial_rollback_leaves_later_manual_lock_in_place(self):
+        replies=iter(['^NRFREQLOCK: 0\nOK','^NRFREQLOCK: 2\n1,1\n78,635000,1,397\nOK',
+                      '^NRFREQLOCK: 1\n0,1\n78,632000,1\nOK'])
+        def at(port,cmd):
+            if cmd=='AT^NRFREQLOCK?':return next(replies)
+            if cmd=='AT^MONSC':return '^MONSC: NR,460,01,635000,1,100000001,64,100001,-80,-10,20\nOK'
+            self.assertEqual(cmd,'AT^NRFREQLOCK=2,1,1,"78","635000","1","397"')
+            return 'OK'
+        with tempfile.TemporaryDirectory() as d,patch.multiple(m,HISTORY=Path(d),at=at),patch.object(m.time,'sleep'):
+            phase,actual=m.select_cell(self.current,self.good,self.cfg,'AT^NRFREQLOCK=0',probe=lambda:True)
+            self.assertEqual((phase,actual),('external_lock_preserved','AT^NRFREQLOCK=1,0,1,"78","632000","1"'))
+            self.assertFalse((Path(d)/'pending.json').exists())
+
+    def test_only_policy_selection_can_restore_after_nr_loss(self):
+        baseline='AT^NRFREQLOCK=1,0,1,"78","635000","1"'
+        selected='AT^NRFREQLOCK=2,0,1,"78","635000","1","397"'
+        active=selected
+        def at(port,cmd):
+            nonlocal active
+            if cmd=='AT^NRFREQLOCK?':return '^NRFREQLOCK: 2\n0,1\n78,635000,1,397\nOK' if active==selected else '^NRFREQLOCK: 1\n0,1\n78,635000,1\nOK'
+            if cmd=='AT^MONSC':return '^MONSC: LTE\nOK'
+            self.assertEqual(cmd,baseline)
+            active=baseline
+            return 'OK'
+        with tempfile.TemporaryDirectory() as d:
+            with self.runtime(Path(d),at),patch.object(sys,'argv',['cell-preference']):
+                for now in (10000,10060,10120):
+                    with patch.object(m.time,'time',return_value=now):m.main()
+                self.assertEqual(active,selected)
+                m.atomic(m.HISTORY/'last-selection.json',{'baseline':baseline,'requested':selected,'confirmed':self.good})
+                with patch.object(m.time,'time',return_value=10180):m.main()
+                self.assertEqual(active,baseline)
+                self.assertTrue(m.load(m.HISTORY/'last-selection.json')['retired'])
+                self.assertEqual(m.load(m.STATE)['phase'],'previous_setting_restored_after_service_loss')
 
 if __name__=='__main__':unittest.main()
