@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 HELPER = Path('usr/libexec/cell-preference')
-BACKUP = Path('overlay/ultra-hotfix-backups/cell-recovery-20261124-r1')
+BACKUP = Path('overlay/ultra-hotfix-backups/cell-recovery-20261126-r1')
 LOCK = Path('tmp/cell-preference.lock')
 
 

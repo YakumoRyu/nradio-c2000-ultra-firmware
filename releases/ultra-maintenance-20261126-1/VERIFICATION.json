@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "kernel": "6.12.103",
+  "runtime": {
+    "passed": true,
+    "installed_helper_matches_archive": true,
+    "only_cell_preference_changed": true,
+    "same_boot_and_service_processes": true,
+    "modem_lock_preserved": true,
+    "scheduled_monitoring_resumed": true,
+    "both_ip_stacks_validated": true,
+    "no_cellular_interface_restart": true,
+    "final_archive_noop": true,
+    "managed_preference_measuring_neighbors": true,
+    "routine_samples": 2,
+    "observation_seconds": 67,
+    "full_image_flashed": false,
+    "natural_return_to_preferred_observed": false,
+    "policy_tests": 36
+  },
+  "private_configuration_included": false,
+  "reboot_required": false,
+  "release": "ultra-maintenance-20261126-1",
+  "payload_files": 1,
+  "final_archive_noop_on_live_router": true
+}

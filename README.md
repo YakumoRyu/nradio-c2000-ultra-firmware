@@ -10,24 +10,24 @@
 | 巴龙WebUI | 上游v3.0.2，QModem适配包3.0.2-r3 |
 | OpenClash | v0.48.002，Ultra适配包0.48.002-rultra1 |
 | Mihomo | v1.19.33 |
-| 完整固件 | ultra-25.12-20261124-r17 |
-| 升级包 | ultra-maintenance-20261124-1 |
+| 完整固件 | ultra-25.12-20261126-r18 |
+| 升级包 | ultra-maintenance-20261126-1 |
 | 固件格式 | sysupgrade，布局兼容号2.0，根分区内预留512MiB |
 
 ## 下载
 
 | 下载 | 用途 |
 | --- | --- |
-| [蜂窝切站修复升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261124-1) | 恢复小区观测，试切时保护原有双栈连通，可在线安装和回退。 |
-| [完整 r17 固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261124-r17) | 内核、根文件系统和配套离线软件仓库。 |
+| [在线小区择优升级包](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-maintenance-20261126-1) | 恢复小区观测，试切时保护原有双栈连通，可在线安装和回退。 |
+| [完整 r18 固件](https://github.com/YakumoRyu/nradio-c2000-ultra-firmware/releases/tag/ultra-25.12-20261126-r18) | 内核、根文件系统和配套离线软件仓库。 |
 
-蜂窝锁定值变化后继续读取实际服务小区，手工锁定的控制权仍归用户。试切成败以原有地址族的连通性和调制解调器回读为准。状态变化保留在 TF 卡，便于对照掉线、锁定及回退的时间。
+允许重选的频点配置可参与在线择优。目标小区消失后比较可见备用小区，目标重新被测到且质量合格时尝试锁回。实际驻留、信号及双栈连通性共同决定试切结果。
 
 PCDN白名单按设备MAC及LAN接口匹配，优先于OpenClash全局过滤，支持动态公网IPv6。保留NAT、UPnP与其他设备的防火墙策略，公共出厂配置默认关闭。
 
 完整固件约208MiB，可选软件仓库约146MiB，内置Docker、Mihomo、Cloudflared、Python和原有管理组件。
 
-- [升级包安装与回退](releases/ultra-maintenance-20261124-1/README.md)
+- [升级包安装与回退](releases/ultra-maintenance-20261126-1/README.md)
 - [完整固件安装](docs/INSTALL.md)
 - [更新日志](CHANGELOG.md)
 - [源码与构建](docs/BUILD.md)

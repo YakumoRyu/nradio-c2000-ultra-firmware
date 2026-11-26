@@ -133,12 +133,90 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(state['phase'],'preferred_frequency_unavailable')
         self.assertIsNone(target)
 
+    def test_mobile_frequency_accepts_exact_mobile_lock(self):
+        c=m.checked_config({'preferred_arfcn':'635000','preferred_mobility':'1'})
+        self.assertEqual(m.preferred_lock(c),'AT^NRFREQLOCK=1,1,1,"78","635000","1"')
+        with self.assertRaises(ValueError):m.checked_config({'preferred_mobility':'2'})
+
+    def test_mobile_policy_can_improve_on_fallback_frequency(self):
+        self.cfg.update(preferred_mobility=1,preferred_arfcn=632000)
+        state={}
+        for t in (10000,10060,10120):state,target=self.decide([self.good],state,t)
+        self.assertEqual(target,self.good)
+
+    def test_only_measured_known_preference_can_cross_frequency(self):
+        self.cfg.update(preferred_mobility=1,preferred_arfcn=632000,preferred_scs=0)
+        # PCI can be reused between frequencies. SCS comes from the preference.
+        raw='^MONNC: NR,632000,64,-70,-10,22\n^MONNC: NR,630000,64,-60,-8,31\n'
+        candidates=m.neighbors(raw,self.current,self.cfg)
+        self.assertEqual(len(candidates),1)
+        self.assertEqual((candidates[0]['pci'],candidates[0]['scs']),(100,0))
+        for t in (10000,10060,10120):
+            state,target=self.decide(candidates+[self.good],{} if t==10000 else state,t)
+        self.assertEqual(target,candidates[0])
+        state,target=self.decide([candidates[0]|{'sinr':-2}],state,10180)
+        self.assertIsNone(target)
+        self.assertNotIn('better_neighbor',state)
+
     @contextlib.contextmanager
     def runtime(self,root,query):
         with patch.multiple(m,HISTORY=root/'history',STATE=root/'state.json',
                             SCAN=root/'scan.json',RUNTIME_LOCK=root/'runtime.lock',at=query,
                             config=lambda:{'enabled':'1','preferred_arfcn':'635000'}):
             yield
+
+    def test_home_return_uses_frequency_and_pci_and_rechecks_quality(self):
+        self.cfg.update(preferred_mobility=1,preferred_arfcn=632000,preferred_pci=100)
+        home=self.good|{'arfcn':632000,'pci':100,'rsrp':-79}
+        other=home|{'pci':564,'rsrp':-78}
+        state={}
+        for t in (10000,10060,10120):
+            state,target=self.decide([self.good,home,other],state,t)
+        self.assertEqual(target,home)
+        self.assertFalse(m.acceptable(home|{'sinr':-3},self.current,self.cfg))
+        self.assertFalse(m.home_cell(self.current,self.cfg))
+        state,target=m.decide(home,[home|{'pci':555,'rsrp':-61}],{},self.cfg,10180)
+        self.assertIsNone(target)
+        self.assertEqual(state['phase'],'preferred_frequency_active')
+
+    def test_mobile_loss_unlocks_and_continues_observing_then_relocks_home(self):
+        cfg={'enabled':'1','preferred_mobility':'1','preferred_arfcn':'635000','preferred_pci':'100'}
+        pref='AT^NRFREQLOCK=1,1,1,"78","635000","1"'
+        target='AT^NRFREQLOCK=2,1,1,"78","635000","1","100"'
+        responses={pref:'^NRFREQLOCK: 1\n1,1\n78,635000,1\nOK',m.UNLOCKED:'^NRFREQLOCK: 0\nOK',
+                   target:'^NRFREQLOCK: 2\n1,1\n78,635000,1,100\nOK'}
+        active=pref
+        signal='^MONSC: LTE\nOK'
+        calls=[]
+        def at(port,cmd):
+            nonlocal active
+            if cmd==m.LOCK_QUERY:return responses[active]
+            if cmd=='AT^MONSC':return signal
+            if cmd=='AT^MONNC':return 'OK'
+            self.assertIn(cmd,responses)
+            calls.append(cmd);active=cmd
+            return 'OK'
+        with tempfile.TemporaryDirectory() as d,self.runtime(Path(d),at),patch.object(m,'config',return_value=cfg),patch.object(sys,'argv',['cell-preference']),patch.object(m,'ipv6_default_present',return_value=True),patch.object(m,'internet_ok',return_value=True),patch.object(m.time,'sleep'):
+            def tick(t):
+                with patch.object(m.time,'time',return_value=t):m.main()
+                return m.load(m.STATE)
+            tick(10000);tick(10060)
+            self.assertEqual(calls,[])
+            self.assertEqual(tick(10120)['phase'],'fallback_after_service_loss')
+            signal='^MONSC: NR,460,01,632000,1,100000001,64,100001,-80,-10,20\nOK'
+            self.assertEqual(tick(10180)['lock_owner'],'fallback')
+            self.assertEqual(calls,[m.UNLOCKED])
+            signal=signal.replace('632000','635000')
+            for t in (12100,12160,12220):state=tick(t)
+            self.assertEqual(state['phase'],'selected')
+            self.assertEqual(calls,[m.UNLOCKED,target])
+            self.assertEqual(tick(12280)['lock_owner'],'selection')
+            # Network handed over, but the modem still reports our old PCI lock.
+            # After persistent absence release just the PCI, leaving mobility on.
+            signal=signal.replace('635000','632000')
+            for t in (12340,12400,12460):state=tick(t)
+            self.assertEqual(state['phase'],'released_absent_home')
+            self.assertEqual(calls,[m.UNLOCKED,target,pref])
 
     def test_external_lock_updates_serving_status_without_any_setter(self):
         replies={'AT^NRFREQLOCK?':'^NRFREQLOCK: 2\n0,1\n78,635000,1,397\nOK',

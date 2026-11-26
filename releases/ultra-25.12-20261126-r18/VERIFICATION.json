@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "kernel": "6.12.103",
+  "runtime": {
+    "passed": true,
+    "installed_helper_matches_archive": true,
+    "only_cell_preference_changed": true,
+    "same_boot_and_service_processes": true,
+    "modem_lock_preserved": true,
+    "scheduled_monitoring_resumed": true,
+    "both_ip_stacks_validated": true,
+    "no_cellular_interface_restart": true,
+    "final_archive_noop": true,
+    "managed_preference_measuring_neighbors": true,
+    "routine_samples": 2,
+    "observation_seconds": 67,
+    "full_image_flashed": false,
+    "natural_return_to_preferred_observed": false,
+    "policy_tests": 36
+  },
+  "private_configuration_included": false,
+  "reboot_required": false,
+  "release": "ultra-25.12-20261126-r18",
+  "format": "sysupgrade",
+  "image_bytes": 218113247,
+  "image_checks": 145,
+  "changed_paths_from_r17": [
+    "etc/ultra-release",
+    "usr/libexec/cell-preference",
+    "usr/sbin/ultra-package-feeds"
+  ],
+  "kernel_and_wifi_byte_identical_to_r17": true,
+  "all_fixes_in_ROM": true,
+  "whole_image_flashed": false,
+  "whole_image_hardware_boot_verified": false,
+  "userspace_checks": 22,
+  "privacy_files_scanned": 7172
+}

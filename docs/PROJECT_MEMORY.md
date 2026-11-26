@@ -123,3 +123,7 @@ r10为每个保护目标保存stopping、stopped、starting阶段。停止中的
 厂商源码BcnCheck在连续无Beacon时只记录超时并调整固件日志，没有恢复动作。本次新增ultra-wifi-health观察服务：驱动连续无Beacon至少20秒，或AP连续三次不可用，经最终复查后调用network.wireless的定向down/up。避开/sbin/wifi up隐含的全局network reload。跳过手动关闭、DFS等待和正常空闲，恢复间隔900秒，每小时最多两次；同boot进程重启保留限频。
 
 事件类别及资源快照以两份256KiB上限日志保存在/overlay/ultra-wifi-health；不保存原始syslog、SSID、密码或客户端身份。默认30秒检测、180秒启动宽限，日常不扫频、不重启网络。15项策略测试和5项安装回退测试通过；实机部署保持boot、hostapd与netifd PID及全部个人配置。双包独立发布为ultra-maintenance-20261107-1、ultra-25.12-20261107-r16；完整镜像启动单列验收。
+
+## 2026-11-26 在线小区择优
+
+首选以 ARFCN、SCS、PCI 共同识别。用户选择优先不断网，只用实测服务小区与在线邻区。频点允许重选并不保证模组上报跨频邻区，验证时分别核对策略控制权、实际驻留和两种地址族的连通性。

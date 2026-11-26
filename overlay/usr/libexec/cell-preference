@@ -47,6 +47,10 @@ def checked_config(values):
     if not 0<=result['preferred_arfcn']<=4294967295:raise ValueError('invalid_preferred_arfcn')
     result['preferred_scs']=int(values.get('preferred_scs','1'))
     if result['preferred_scs'] not in range(5):raise ValueError('invalid_preferred_scs')
+    result['preferred_mobility']=int(values.get('preferred_mobility','0'))
+    if result['preferred_mobility'] not in (0,1):raise ValueError('invalid_preferred_mobility')
+    result['preferred_pci']=int(values.get('preferred_pci','-1'))
+    if not -1<=result['preferred_pci']<=1007:raise ValueError('invalid_preferred_pci')
     return result
 
 def at(port,command):
@@ -85,16 +89,18 @@ def serving(raw):
     if row['scs'] not in range(5) or not 0<=row['pci']<=1007 or not valid_signal(row):raise ValueError('invalid_serving_cell')
     return row
 
-def neighbors(raw,current):
+def neighbors(raw,current,cfg=None):
     rows=[]
     for line in raw.splitlines():
         match=re.fullmatch(r'\s*\^MONNC:\s*NR,(\d+),([0-9A-Fa-f]+),(-?\d+),(-?\d+),(-?\d+)\s*',line)
         if not match:continue
         freq,pci,power,quality,sinr=match.groups()
         row={'arfcn':int(freq),'scs':current['scs'],'pci':int(pci,16),'rsrp':int(power),'rsrq':int(quality),'sinr':int(sinr)}
-        # MONNC supplies no PLMN or SCS for another frequency; do not infer them.
-        if row['arfcn']!=current['arfcn'] or not 0<=row['pci']<=1007 or not valid_signal(row):continue
-        if row['pci']==current['pci']:continue
+        # Only the configured preference has a known SCS on another frequency.
+        if row['arfcn']!=current['arfcn']:
+            if not cfg or not cfg['preferred_mobility'] or row['arfcn']!=cfg['preferred_arfcn']:continue
+            row['scs']=cfg['preferred_scs']
+        if not 0<=row['pci']<=1007 or not valid_signal(row) or key(row)==key(current):continue
         rows.append(row)
     return rows
 
@@ -111,22 +117,38 @@ def band_for_frequency(freq):
 
 def key(row):return f"{row['arfcn']}:{row['scs']}:{row['pci']}"
 
+def home_cell(row,cfg):
+    return (cfg['preferred_mobility']==1 and cfg['preferred_pci']>=0 and
+            (row.get('arfcn'),row.get('scs'),row.get('pci'))==(cfg['preferred_arfcn'],cfg['preferred_scs'],cfg['preferred_pci']))
+
+def acceptable(row,current,cfg):
+    if home_cell(row,cfg):
+        return (row['rsrp']>=current['rsrp']-3 and row['sinr']>=max(cfg['min_sinr_db'],current['sinr']-cfg['max_sinr_loss_db'])
+                and row['rsrq']>=current['rsrq']-cfg['max_rsrq_loss_db'])
+    return improves(row,current,cfg)
+
 def decide(current,candidates,state,cfg,now):
     result=dict(state)
     if now<state.get('observed',now) or now-state.get('observed',now)>150:
         result.pop('candidate',None);result['count']=0
     result['observed']=now;result['current']=dict(current)
     preferred=cfg.get('preferred_arfcn',0)
-    eligible=[row for row in candidates if row['arfcn']==current['arfcn']
-              and row['scs']==current['scs'] and (not preferred or current['arfcn']==preferred)
-              and row['rsrp']-current['rsrp']>=cfg['gain_db'] and row['sinr']>=cfg['min_sinr_db']
-              and row['sinr']>=current['sinr']-cfg['max_sinr_loss_db'] and row['rsrq']>=current['rsrq']-cfg['max_rsrq_loss_db']]
+    mobile=cfg['preferred_mobility']
+    eligible=[]
+    for row in candidates:
+        if home_cell(current,cfg) and current['sinr']>=cfg['min_sinr_db'] and not home_cell(row,cfg):
+            continue
+        same_channel=(row['arfcn'],row['scs'])==(current['arfcn'],current['scs'])
+        on_preference=(row['arfcn'],row['scs'])==(preferred,cfg['preferred_scs'])
+        if same_channel and (mobile or not preferred or on_preference) or mobile and on_preference:
+            if acceptable(row,current,cfg):eligible.append(row)
     if not eligible:
         phase='preferred_frequency_active' if preferred and current['arfcn']==preferred else 'current_best_observed'
         if preferred and current['arfcn']!=preferred:phase='preferred_frequency_unavailable'
         result.update(phase=phase,candidate=None,count=0,preferred_arfcn=preferred)
+        result.pop('better_neighbor',None)
         return result,None
-    best=max(eligible,key=lambda row:(row['rsrp'],row['sinr'],row['rsrq']))
+    best=max(eligible,key=lambda row:(home_cell(row,cfg),row['arfcn']==preferred,row['rsrp'],row['sinr'],row['rsrq']))
     if state.get('current') and key(state['current'])!=key(current):result.update(candidate=None,count=0)
     if result.get('candidate')==key(best):
         if now-result.get('candidate_sample_at',0)>=45:
@@ -140,6 +162,11 @@ def decide(current,candidates,state,cfg,now):
         result['phase']='confirming_better_neighbor';return result,None
     result.update(phase='ready',count=0)
     return result,best
+
+def improves(row,current,cfg):
+    return (row['rsrp']-current['rsrp']>=cfg['gain_db'] and row['sinr']>=cfg['min_sinr_db']
+            and row['sinr']>=current['sinr']-cfg['max_sinr_loss_db']
+            and row['rsrq']>=current['rsrq']-cfg['max_rsrq_loss_db'])
 
 def atomic(path,value):
     path.parent.mkdir(parents=True,exist_ok=True)
@@ -183,7 +210,7 @@ def preferred_lock(cfg):
     frequency=cfg['preferred_arfcn']
     if not frequency:return UNLOCKED
     band=band_for_frequency(frequency)
-    return f'AT^NRFREQLOCK=1,0,1,"{band}","{frequency}","{cfg["preferred_scs"]}"'
+    return f'AT^NRFREQLOCK=1,{cfg["preferred_mobility"]},1,"{band}","{frequency}","{cfg["preferred_scs"]}"'
 
 def restore_transaction(port,transaction):
     baseline=transaction['baseline']
@@ -234,7 +261,7 @@ def select_cell(current,target,cfg,baseline,probe=None):
     active=read_lock(port)
     if active!=baseline:return 'external_lock_preserved',active
     band=band_for_frequency(target['arfcn'])
-    mobility=0 if cfg.get('preferred_arfcn',0) else 1
+    mobility=cfg['preferred_mobility'] if cfg.get('preferred_arfcn',0) else 1
     command=f'AT^NRFREQLOCK=2,{mobility},1,"{band}","{target["arfcn"]}","{target["scs"]}","{target["pci"]}"'
     journal={'epoch':time.time(),'baseline':baseline,'fallback':preferred_lock(cfg),'requested':command,'target':target}
     pending=HISTORY/'pending.json'
@@ -246,7 +273,7 @@ def select_cell(current,target,cfg,baseline,probe=None):
         for _ in range(3):
             time.sleep(3)
             observed=read_serving(port)
-            if observed and key(observed)==key(target) and observed['rsrp']-current['rsrp']>=cfg['gain_db'] and probe():
+            if observed and key(observed)==key(target) and acceptable(observed,current,cfg) and probe():
                 if read_lock(port)!=command:raise RuntimeError('trial_lock_changed')
                 journal.update(confirmed={k:observed[k] for k in ('arfcn','scs','pci','rsrp','rsrq','sinr')},finished=time.time())
                 atomic(HISTORY/'last-selection.json',journal)
@@ -319,6 +346,11 @@ def main():
                 report(old_state,state|{'phase':phase,'expected_lock':active,'current':None,'candidate':None,'count':0})
                 return
             desired=preferred_lock(cfg)
+            fallback_path=HISTORY/'mobile-fallback.json'
+            fallback=load(fallback_path)
+            roaming=(cfg['preferred_mobility']==1 and baseline==UNLOCKED and fallback.get('preference')==desired)
+            if fallback and not roaming:
+                fallback_path.unlink(missing_ok=True)
             if args.enable_auto:
                 # Explicit entry into automatic mode retires an old frequency/cell lock.
                 # Ordinary scheduled checks never clear a manual lock on their own.
@@ -335,6 +367,8 @@ def main():
                     raise
                 pending_path.unlink()
                 baseline=desired
+                roaming=False
+                fallback_path.unlink(missing_ok=True)
                 state={'expected_lock':baseline,'last_attempt':state.get('last_attempt',0)}
             lock_changed=state.get('expected_lock')!=baseline
             if lock_changed:
@@ -348,8 +382,8 @@ def main():
                     atomic(HISTORY/'last-selection.json',selection|{'retired':True})
             else:
                 owned=False
-            managed=baseline==desired or owned
-            state['lock_owner']='selection' if owned else 'preference' if managed else 'external'
+            managed=baseline==desired or owned or roaming
+            state['lock_owner']='selection' if owned else 'fallback' if roaming else 'preference' if managed else 'external'
             current=read_serving(port)
             if current is None:
                 now=time.time();sample_at=state.get('no_nr_sample_at',0)
@@ -358,20 +392,52 @@ def main():
                 if now-sample_at>=45 or failures==0:failures+=1;sample_at=now
                 state.update(no_nr_samples=failures,no_nr_sample_at=sample_at,candidate=None,count=0,
                              phase='waiting_for_nr_service',current=None)
-                if failures>=3 and owned:
-                    recovery={'epoch':now,'baseline':desired,'requested':baseline,'last_recovery':now}
+                mobile_loss=cfg['preferred_mobility']==1 and managed and baseline!=UNLOCKED
+                if failures>=3 and (owned or mobile_loss):
+                    destination=UNLOCKED if mobile_loss else desired
+                    recovery={'epoch':now,'baseline':destination,'requested':baseline,'last_recovery':now}
                     atomic(pending_path,recovery)
+                    if mobile_loss:atomic(fallback_path,{'preference':desired,'epoch':now})
                     record_attempt(state,now)
                     active=restore_transaction(port,recovery)
                     pending_path.unlink()
-                    atomic(HISTORY/'last-selection.json',selection|{'retired':True})
-                    phase='previous_setting_restored_after_service_loss' if active==desired else 'external_lock_preserved'
-                    state.update(phase=phase,expected_lock=active,lock_owner='preference' if active==desired else 'external')
+                    if owned:atomic(HISTORY/'last-selection.json',selection|{'retired':True})
+                    if active==UNLOCKED and mobile_loss:
+                        state.update(phase='fallback_after_service_loss',expected_lock=active,lock_owner='fallback')
+                    else:
+                        phase='previous_setting_restored_after_service_loss' if active==desired else 'external_lock_preserved'
+                        state.update(phase=phase,expected_lock=active,lock_owner='preference' if active==desired else 'external')
             elif not managed:
                 state.update(phase='external_lock_active',current=current,no_nr_samples=0,candidate=None,count=0)
             else:
-                cells=neighbors(at(port,'AT^MONNC'),current)
-                state,target=decide(current,cells,state,cfg,time.time())
+                cells=neighbors(at(port,'AT^MONNC'),current,cfg)
+                candidates=list(cells)
+                # After losing the home cell, the modem can hand over on its own.
+                # Relinquish our old PCI hint once that handover is confirmed.
+                stale_home=(owned and home_cell(selection.get('confirmed') or {},cfg)
+                            and not home_cell(current,cfg) and not any(home_cell(c,cfg) for c in cells))
+                now=time.time()
+                since=state.get('away_sample_at',0)
+                if not stale_home or lock_changed or now<since or now-since>150:
+                    state.update(away_count=0,away_sample_at=0)
+                if stale_home and now-state.get('away_sample_at',0)>=45:
+                    state.update(away_count=state.get('away_count',0)+1,away_sample_at=now)
+                if stale_home and state['away_count']>=cfg['samples']:
+                    journal={'epoch':now,'baseline':desired,'requested':baseline,'last_recovery':now}
+                    atomic(pending_path,journal)
+                    active=restore_transaction(port,journal)
+                    pending_path.unlink()
+                    atomic(HISTORY/'last-selection.json',selection|{'retired':True})
+                    state.update(phase='released_absent_home' if active==desired else 'external_lock_preserved',
+                                 expected_lock=active,current=current,no_nr_samples=0,count=0,candidate=None,
+                                 lock_owner='preference' if active==desired else 'external',away_count=0)
+                    report(old_state,state)
+                    return
+                if home_cell(current,cfg) and (not owned or selection.get('confirmed',{}).get('pci')!=current['pci']
+                                               or selection.get('confirmed',{}).get('arfcn')!=current['arfcn']):
+                    candidates.append(current)
+                state,target=decide(current,candidates,state,cfg,time.time())
+                state['measured_neighbors']=len(cells)
                 state['no_nr_samples']=0
                 if target:
                     record_attempt(state,time.time())
